@@ -56,7 +56,11 @@ impl Parser {
                     exprs.push(self.parse_expr()?);
                 }
 
-                assert_eq!(Token::RightParen, self.advance().unwrap());
+                match self.advance() {
+                    Some(Token::RightParen) => {}
+                    _ => return Err(Error::UnexpectedToken),
+                }
+
                 Ok(SExpr::List(exprs))
             }
             _ => todo!(),
@@ -85,7 +89,7 @@ impl Display for SExpr {
                 write!(f, "({})", items.join(" "))
             }
             SExpr::Integer(n) => write!(f, "{n}"),
-            SExpr::Decimal(d) => write!(f, "{d}"),
+            SExpr::Decimal(d) => write!(f, "{d}",),
             SExpr::Rational(r) => write!(f, "{r}"),
         }
     }

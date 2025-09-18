@@ -7,4 +7,4 @@ edition = "2024"
 misp_lexer = { path = "../misp_lexer" }
 misp_parser = { path = "../misp_parser" }
 misp_executor = { path = "../misp_executor" }
-rustyline = "17.0.1"
+ratatui = "0.29.0"

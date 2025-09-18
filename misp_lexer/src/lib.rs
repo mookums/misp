@@ -66,56 +66,43 @@ impl Lexer {
     }
 
     fn literal_token<'a>(&mut self, rest: &'a str) -> Option<(&'a str, Token)> {
-        let first_char = rest.chars().next()?;
+        let chars = rest.char_indices();
+        let mut end_pos = rest.len();
 
-        match first_char {
-            c if c.is_ascii_digit() || c == '-' => {
-                let chars = rest.char_indices();
-                let mut end_pos = 0;
-                let mut has_dot = false;
-                let mut is_first = true;
-
-                for (pos, ch) in chars {
-                    match ch {
-                        '0'..='9' => {
-                            end_pos = pos + ch.len_utf8();
-                            is_first = false;
-                        }
-                        '.' if !has_dot && !is_first => {
-                            has_dot = true;
-                            end_pos = pos + ch.len_utf8();
-                        }
-                        '-' if is_first => {
-                            end_pos = pos + ch.len_utf8();
-                            is_first = false;
-                        }
-                        _ if ch.is_whitespace() || "()".contains(ch) => break,
-                        _ => return None, // Invalid character in number
-                    }
-                }
-
-                if end_pos == 0 || (end_pos == 1 && first_char == '-') {
-                    return None;
-                }
-
-                let token_str = &rest[..end_pos];
-                let remaining = &rest[end_pos..];
-
-                let token = if has_dot {
-                    let decimal = BigDecimal::from_str(token_str).unwrap();
-                    Token::Decimal(decimal)
-                } else {
-                    let integer = BigInt::from_str(token_str).unwrap();
-                    Token::Integer(integer)
-                };
-
-                self.column += token_str.chars().count();
-
-                Some((remaining, token))
+        for (pos, ch) in chars {
+            if ch.is_whitespace() || "()".contains(ch) {
+                break;
             }
 
-            _ => None,
+            end_pos = pos + ch.len_utf8();
         }
+
+        if end_pos == 0 {
+            return None;
+        }
+
+        let token_str = &rest[..end_pos];
+        let remaining = &rest[end_pos..];
+
+        if !token_str
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == '-' || c == '.' || c == '/')
+        {
+            return None;
+        }
+        let token = if token_str.contains('.') {
+            let decimal = BigDecimal::from_str(token_str).ok()?;
+            Token::Decimal(decimal)
+        } else if token_str.contains('/') {
+            let rational = BigRational::from_str(token_str).ok()?;
+            Token::Rational(rational)
+        } else {
+            let integer = BigInt::from_str(token_str).ok()?;
+            Token::Integer(integer)
+        };
+
+        self.column += token_str.chars().count();
+        Some((remaining, token))
     }
 
     fn ident_token<'a>(&mut self, rest: &'a str) -> Option<(&'a str, Token)> {
