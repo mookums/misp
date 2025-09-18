@@ -1,6 +1,7 @@
 use crate::Error;
 use bigdecimal::BigDecimal;
 use misp_parser::SExpr;
+use num::ToPrimitive;
 use num::{BigInt, BigRational, Zero};
 
 use crate::Executor;
@@ -119,7 +120,16 @@ pub fn builtin_divide(executor: &mut Executor, args: &[SExpr]) -> Result<SExpr, 
             let right = executor.eval(&args[1])?;
 
             match (left, right) {
-                (SExpr::Integer(a), SExpr::Integer(b)) => Ok(SExpr::Integer(a / b)),
+                (SExpr::Integer(a), SExpr::Integer(b)) => {
+                    let res = BigDecimal::from(a) / BigDecimal::from(b);
+
+                    if res.is_integer() {
+                        let int_res = res.with_scale(0).as_bigint_and_exponent().0;
+                        Ok(SExpr::Integer(int_res))
+                    } else {
+                        Ok(SExpr::Decimal(res))
+                    }
+                }
                 (SExpr::Decimal(a), SExpr::Decimal(b)) => Ok(SExpr::Decimal(a / b)),
                 (SExpr::Rational(a), SExpr::Rational(b)) => Ok(SExpr::Rational(a / b)),
 
@@ -171,5 +181,28 @@ pub fn builtin_sqrt(executor: &mut Executor, args: &[SExpr]) -> Result<SExpr, Er
             expected: 1,
             actual: x,
         }),
+    }
+}
+
+pub fn builtin_pow(executor: &mut Executor, args: &[SExpr]) -> Result<SExpr, Error> {
+    match args.len() {
+        0 => Ok(SExpr::Integer(BigInt::ZERO)),
+        1 => executor.eval(&args[0]),
+        2 => {
+            // exponent
+            let SExpr::Integer(left) = executor.eval(&args[0])? else {
+                todo!();
+            };
+            let right = executor.eval(&args[1])?;
+
+            let left_int = left.to_u32().unwrap();
+
+            match right {
+                SExpr::Integer(n) => Ok(SExpr::Integer(n.pow(left_int))),
+                SExpr::Rational(r) => Ok(SExpr::Rational(r.pow(left_int as i32))),
+                _ => Err(Error::FunctionCall),
+            }
+        }
+        _ => Err(Error::FunctionCall),
     }
 }

@@ -1,10 +1,16 @@
+mod func;
 mod math;
 
 use misp_parser::SExpr;
 use num::BigInt;
 use std::collections::HashMap;
 
-use crate::math::{builtin_add, builtin_divide, builtin_minus, builtin_multiply, builtin_sqrt};
+use crate::{
+    func::builtin_func,
+    math::{
+        builtin_add, builtin_divide, builtin_minus, builtin_multiply, builtin_pow, builtin_sqrt,
+    },
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -24,6 +30,7 @@ pub enum Error {
 
 type NativeMispFunction = fn(&mut Executor, &[SExpr]) -> Result<SExpr, Error>;
 
+#[derive(Clone)]
 pub enum Function {
     Native(NativeMispFunction),
     UserDefined {
@@ -43,6 +50,10 @@ impl Environment {
         self.functions.insert(name.to_string(), Function::Native(f));
     }
 
+    pub fn set_prev(&mut self, value: SExpr) {
+        self.variables.insert("prev".to_string(), value);
+    }
+
     pub fn set_variable(&mut self, name: impl ToString, value: SExpr) {
         self.variables.insert(name.to_string(), value);
     }
@@ -58,14 +69,16 @@ pub struct Executor {
 impl Default for Executor {
     fn default() -> Self {
         let mut env = Environment::default();
+        env.set_prev(SExpr::Integer(BigInt::ZERO));
 
-        env.set_variable("ans", SExpr::Integer(BigInt::ZERO));
+        env.define_native_function("func", builtin_func);
 
         env.define_native_function("+", builtin_add);
         env.define_native_function("-", builtin_minus);
         env.define_native_function("*", builtin_multiply);
         env.define_native_function("/", builtin_divide);
         env.define_native_function("sqrt", builtin_sqrt);
+        env.define_native_function("pow", builtin_pow);
 
         Self { env }
     }
@@ -99,12 +112,34 @@ impl Executor {
                     .env
                     .functions
                     .get(func_name)
+                    .cloned()
                     .ok_or_else(|| Error::FunctionNotFound(func_name.to_string()))?;
+
                 let args = &exprs[1..];
 
                 match func {
                     Function::Native(f) => f(self, args),
-                    _ => todo!(),
+                    Function::UserDefined { params, body } => {
+                        if args.len() != params.len() {
+                            todo!("wrong arity");
+                        }
+
+                        let mut arg_values = Vec::new();
+                        for arg in args {
+                            arg_values.push(self.eval(arg)?);
+                        }
+
+                        let saved_variables = self.env.variables.clone();
+
+                        for (param, value) in params.iter().zip(arg_values.iter()) {
+                            self.env.set_variable(param, value.clone());
+                        }
+
+                        let result = self.eval(&body);
+                        self.env.variables = saved_variables;
+
+                        result
+                    }
                 }
             }
             SExpr::Integer(_) | SExpr::Decimal(_) | SExpr::Rational(_) => Ok(expr.clone()),
@@ -112,8 +147,8 @@ impl Executor {
     }
 
     pub fn execute(&mut self, expr: &SExpr) -> Result<SExpr, Error> {
-        let ans = self.eval(expr)?;
-        self.env.set_variable("ans", ans.clone());
-        Ok(ans)
+        let prev = self.eval(expr)?;
+        self.env.set_prev(prev.clone());
+        Ok(prev)
     }
 }
