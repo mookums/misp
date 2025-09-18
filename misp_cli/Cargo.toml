@@ -1,0 +1,10 @@
+[package]
+name = "misp"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+misp_lexer = { path = "../misp_lexer" }
+misp_parser = { path = "../misp_parser" }
+misp_executor = { path = "../misp_executor" }
+rustyline = "17.0.1"

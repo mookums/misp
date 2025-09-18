@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = [
+    "misp_cli",
+    "misp_executor",
+    "misp_lexer",
+    "misp_parser",
+]
+
+[workspace.dependencies]
+num = "0.4.3"
+bigdecimal = "0.4.8"
+thiserror = "2.0.12"

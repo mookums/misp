@@ -1,0 +1,11 @@
+[package]
+name = "misp_executor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+misp_parser = { path = "../misp_parser" }
+
+num.workspace = true
+bigdecimal.workspace = true
+thiserror.workspace = true
