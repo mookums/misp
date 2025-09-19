@@ -8,4 +8,3 @@ misp_lexer = { path = "../misp_lexer" }
 misp_parser = { path = "../misp_parser" }
 misp_executor = { path = "../misp_executor" }
 ratatui = "0.29.0"
-tui-textarea = "0.7.0"

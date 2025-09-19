@@ -14,7 +14,6 @@ use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph},
 };
-use tui_textarea::{Scrolling, TextArea};
 
 #[derive(Default)]
 struct App {
@@ -122,11 +121,14 @@ impl App {
             self.history.drain(0..self.history.len() - MAX_HISTORY);
         }
 
-        let mut history = TextArea::new(self.history.clone());
-        history.scroll(Scrolling::Delta {
-            rows: self.history.len().saturating_sub(chunks[0].height as usize) as i16,
-            cols: 0,
-        });
+        let content_height = self.history.len() as u16;
+        let visible_height = chunks[0].height.saturating_sub(2);
+        let scroll_offset = content_height.saturating_sub(visible_height);
+
+        let history = Paragraph::new(self.history.join("\n"))
+            .block(Block::bordered().title("misp repl"))
+            .scroll((scroll_offset, 0));
+
         f.render_widget(&history, chunks[0]);
 
         let input = Paragraph::new(format!("misp >> {}", self.input))
