@@ -6,6 +6,14 @@ use num::{BigRational, Zero};
 macro_rules! binary_op {
     ($name:ident, $op_name:literal, $op:tt) => {
         pub fn $name(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
+            if args.is_empty() {
+                return Err(Error::FunctionArity {
+                    name: $op_name.to_string(),
+                    expected: 2,
+                    actual: args.len(),
+                });
+            }
+
             if args.len() != 2 {
                 return Err(Error::FunctionArity {
                     name: $op_name.to_string(),

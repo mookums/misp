@@ -1,9 +1,9 @@
 use crate::Error;
 use crate::Executor;
+use crate::Function;
 use crate::Lambda;
+use crate::RuntimeMispFunction;
 use crate::Value;
-use crate::environment::Function;
-use crate::environment::RuntimeMispFunction;
 
 pub fn builtin_func(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
     if args.len() != 3 {
@@ -77,9 +77,13 @@ pub fn builtin_let_func(executor: &mut Executor, args: &[Value]) -> Result<Value
         body: Box::new(body),
     }));
 
-    executor.env.set(name, function.clone());
+    executor.env.push_scope();
 
-    executor.eval(&args[3])
+    executor.env.set(name, function.clone());
+    let result = executor.eval(&args[3]);
+
+    executor.env.pop_scope();
+    result
 }
 
 pub fn builtin_lambda(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {

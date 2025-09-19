@@ -17,12 +17,13 @@ use builtin::{
 
 use crate::{
     builtin::{
+        control::builtin_let,
         func::{builtin_lambda, builtin_let_func},
         math::{builtin_mod, builtin_not_equal},
         trig::{builtin_acos, builtin_asin, builtin_atan, builtin_cos, builtin_sin, builtin_tan},
     },
     config::{Config, DecimalFormat},
-    environment::{Environment, Function, Scope},
+    environment::{Environment, Scope},
 };
 
 #[derive(Debug, Clone)]
@@ -30,6 +31,20 @@ pub struct Lambda {
     params: Vec<String>,
     body: Box<Value>,
     scope: Scope,
+}
+
+type NativeMispFunction = fn(&mut Executor, &[Value]) -> Result<Value, Error>;
+
+#[derive(Debug, Clone)]
+pub struct RuntimeMispFunction {
+    pub params: Vec<String>,
+    pub body: Box<Value>,
+}
+
+#[derive(Debug, Clone)]
+pub enum Function {
+    Native(NativeMispFunction),
+    Runtime(RuntimeMispFunction),
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +105,7 @@ impl Default for Executor {
 
         // Control Flow Functions
         env.define_native_function("if", builtin_if);
+        env.define_native_function("let", builtin_let);
 
         // Math Functions
         env.define_native_function("+", builtin_add);
@@ -135,16 +151,13 @@ impl Executor {
                 let caller = &self.eval(&exprs[0])?;
                 let args = &exprs[1..];
 
-                // When you use the function call syntax,
-                // you can either pass in a NAME
-
                 match caller {
                     Value::Function(func) => match func {
                         Function::Native(f) => f(self, args),
                         Function::Runtime(f) => {
                             if args.len() != f.params.len() {
                                 return Err(Error::FunctionArity {
-                                    name: "function".to_string(),
+                                    name: self.print(caller),
                                     expected: f.params.len(),
                                     actual: args.len(),
                                 });
@@ -171,7 +184,7 @@ impl Executor {
                     Value::Lambda(lambda) => {
                         if args.len() != lambda.params.len() {
                             return Err(Error::FunctionArity {
-                                name: "lambda".to_string(),
+                                name: self.print(caller),
                                 expected: lambda.params.len(),
                                 actual: args.len(),
                             });
@@ -211,8 +224,8 @@ impl Executor {
         Ok(prev)
     }
 
-    pub fn print(&self, expr: &Value) -> String {
-        match expr {
+    pub fn print(&self, value: &Value) -> String {
+        match value {
             Value::Atom(s) => s.to_string(),
             Value::List(exprs) => {
                 let items: Vec<String> = exprs.iter().map(|e| self.print(e)).collect();
@@ -226,12 +239,12 @@ impl Executor {
                     .to_scientific_notation(),
             },
             Value::Rational(r) => format!("{r}"),
-            Value::Lambda(lambda) => format!("lambda ({})", lambda.params.join(",")),
+            Value::Lambda(lambda) => format!("lambda ({})", lambda.params.join(", ")),
             Value::Function(func) => format!(
                 "func ({})",
                 match func {
                     Function::Native(_) => "native".to_string(),
-                    Function::Runtime(rt) => rt.params.join(","),
+                    Function::Runtime(rt) => rt.params.join(", "),
                 }
             ),
         }

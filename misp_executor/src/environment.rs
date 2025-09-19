@@ -1,20 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{Error, Executor, Value};
-
-type NativeMispFunction = fn(&mut Executor, &[Value]) -> Result<Value, Error>;
-
-#[derive(Debug, Clone)]
-pub struct RuntimeMispFunction {
-    pub params: Vec<String>,
-    pub body: Box<Value>,
-}
-
-#[derive(Debug, Clone)]
-pub enum Function {
-    Native(NativeMispFunction),
-    Runtime(RuntimeMispFunction),
-}
+use crate::{Function, NativeMispFunction, Value};
 
 #[derive(Debug, Default, Clone)]
 pub struct Scope {
