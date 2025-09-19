@@ -14,6 +14,7 @@ use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph},
 };
+use tui_textarea::{Scrolling, TextArea};
 
 #[derive(Default)]
 struct App {
@@ -48,13 +49,11 @@ impl App {
 
     fn delete_char(&mut self) {
         if self.cursor > 0 {
-            // Check if we're deleting an auto-paired paren
             if self.cursor > 0 && self.cursor < self.input.len() {
                 let prev_char = self.input.chars().nth(self.cursor - 1);
                 let next_char = self.input.chars().nth(self.cursor);
 
                 if prev_char == Some('(') && next_char == Some(')') {
-                    // Delete both ( and )
                     self.input.remove(self.cursor);
                     self.input.remove(self.cursor - 1);
                     self.cursor -= 1;
@@ -75,7 +74,6 @@ impl App {
 
         self.history.push(format!("misp >> {}", line));
 
-        // Parse and execute
         let lexer = Lexer::default();
         let tokens = match lexer.lex(&line) {
             Ok(tokens) => tokens,
@@ -87,6 +85,8 @@ impl App {
             }
         };
 
+        // self.history.push(format!("Lexed: {tokens:?}\n"));
+
         let mut parser = Parser::new(tokens);
         let sexprs = match parser.parse() {
             Ok(sexprs) => sexprs,
@@ -97,6 +97,8 @@ impl App {
                 return;
             }
         };
+
+        // self.history.push(format!("Parsed: {sexprs:?}\n"));
 
         for sexpr in sexprs {
             match self.executor.execute(&sexpr) {
@@ -115,10 +117,17 @@ impl App {
             .direction(Direction::Vertical)
             .split(f.area());
 
-        let history_text = self.history.join("\n");
-        let history = Paragraph::new(history_text)
-            .block(Block::default().borders(Borders::ALL).title("misp repl"));
-        f.render_widget(history, chunks[0]);
+        const MAX_HISTORY: usize = 1000;
+        if self.history.len() > MAX_HISTORY {
+            self.history.drain(0..self.history.len() - MAX_HISTORY);
+        }
+
+        let mut history = TextArea::new(self.history.clone());
+        history.scroll(Scrolling::Delta {
+            rows: self.history.len().saturating_sub(chunks[0].height as usize) as i16,
+            cols: 0,
+        });
+        f.render_widget(&history, chunks[0]);
 
         let input = Paragraph::new(format!("misp >> {}", self.input))
             .block(Block::default().borders(Borders::ALL).title("input"));

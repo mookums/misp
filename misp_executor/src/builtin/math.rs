@@ -219,6 +219,6 @@ pub fn builtin_pow(executor: &mut Executor, args: &[Value]) -> Result<Value, Err
     match right {
         Value::Integer(n) => Ok(Value::Integer(n.pow(left_int))),
         Value::Rational(r) => Ok(Value::Rational(r.pow(left_int as i32))),
-        _ => Err(Error::FunctionCall),
+        _ => todo!("Unsupported type for pow"),
     }
 }
