@@ -1,12 +1,10 @@
+use crate::{Error, Executor, Value, config::AngleMode};
 use bigdecimal::BigDecimal;
-use misp_parser::SExpr;
 use num::{FromPrimitive, ToPrimitive};
-
-use crate::{Error, Executor, config::AngleMode};
 
 macro_rules! trig_op {
     ($name:ident, $op_name:literal, $op:tt) => {
-        pub fn $name(executor: &mut Executor, args: &[SExpr]) -> Result<SExpr, Error> {
+        pub fn $name(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
             if args.len() != 1 {
                 return Err(Error::FunctionArity {
                     name: $op_name.to_string(),
@@ -17,9 +15,9 @@ macro_rules! trig_op {
 
             let arg = executor.eval(&args[0])?;
             let value_f64: f64 = match &arg {
-                SExpr::Integer(n) => n.to_f64().unwrap(),
-                SExpr::Decimal(d) => d.to_f64().unwrap(),
-                SExpr::Rational(r) => r.to_f64().unwrap(),
+                Value::Integer(n) => n.to_f64().unwrap(),
+                Value::Decimal(d) => d.to_f64().unwrap(),
+                Value::Rational(r) => r.to_f64().unwrap(),
                 _ => return Err(Error::FunctionCall),
             };
 
@@ -29,14 +27,14 @@ macro_rules! trig_op {
             };
 
             let result = proper_angle.$op();
-            Ok(SExpr::Decimal(BigDecimal::from_f64(result).unwrap()))
+            Ok(Value::Decimal(BigDecimal::from_f64(result).unwrap()))
         }
     };
 }
 
 macro_rules! inverse_trig_op {
     ($name:ident, $op_name:literal, $op:tt) => {
-        pub fn $name(executor: &mut Executor, args: &[SExpr]) -> Result<SExpr, Error> {
+        pub fn $name(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
             if args.len() != 1 {
                 return Err(Error::FunctionArity {
                     name: $op_name.to_string(),
@@ -48,9 +46,9 @@ macro_rules! inverse_trig_op {
             let arg = executor.eval(&args[0])?;
 
             let value_f64: f64 = match &arg {
-                SExpr::Integer(n) => n.to_f64().unwrap(),
-                SExpr::Decimal(d) => d.to_f64().unwrap(),
-                SExpr::Rational(r) => r.to_f64().unwrap(),
+                Value::Integer(n) => n.to_f64().unwrap(),
+                Value::Decimal(d) => d.to_f64().unwrap(),
+                Value::Rational(r) => r.to_f64().unwrap(),
                 _ => return Err(Error::FunctionCall),
             };
 
@@ -61,7 +59,7 @@ macro_rules! inverse_trig_op {
                 AngleMode::Degrees => result_radians.to_degrees(),
             };
 
-            Ok(SExpr::Decimal(BigDecimal::from_f64(proper_angle).unwrap()))
+            Ok(Value::Decimal(BigDecimal::from_f64(proper_angle).unwrap()))
         }
     };
 }

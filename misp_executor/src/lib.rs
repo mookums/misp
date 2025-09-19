@@ -2,8 +2,9 @@ mod builtin;
 pub mod config;
 pub mod environment;
 
+use bigdecimal::BigDecimal;
 use misp_parser::SExpr;
-use num::BigInt;
+use num::{BigInt, BigRational};
 
 use builtin::{
     control::builtin_if,
@@ -16,13 +17,43 @@ use builtin::{
 
 use crate::{
     builtin::{
-        func::builtin_lambda,
+        func::{builtin_lambda, builtin_let_func},
         math::{builtin_mod, builtin_not_equal},
         trig::{builtin_acos, builtin_asin, builtin_atan, builtin_cos, builtin_sin, builtin_tan},
     },
     config::{Config, DecimalFormat},
-    environment::{Environment, Function},
+    environment::{Environment, Function, Scope},
 };
+
+#[derive(Debug, Clone)]
+pub struct Lambda {
+    params: Vec<String>,
+    body: Box<Value>,
+    scope: Scope,
+}
+
+#[derive(Debug, Clone)]
+pub enum Value {
+    Atom(String),
+    List(Vec<Value>),
+    Integer(BigInt),
+    Decimal(BigDecimal),
+    Rational(BigRational),
+    Lambda(Lambda),
+    Function(Function),
+}
+
+impl From<SExpr> for Value {
+    fn from(value: SExpr) -> Self {
+        match value {
+            SExpr::Atom(str) => Value::Atom(str),
+            SExpr::List(sexprs) => Value::List(sexprs.into_iter().map(|e| e.into()).collect()),
+            SExpr::Integer(n) => Value::Integer(n),
+            SExpr::Decimal(d) => Value::Decimal(d),
+            SExpr::Rational(r) => Value::Rational(r),
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -30,7 +61,7 @@ pub enum Error {
     UnknownSymbol(String),
     #[error("Invalid Function Call")]
     FunctionCall,
-    #[error("Wrong arity for func '{name}': expected {expected}, got {actual}")]
+    #[error("Wrong arity for '{name}': expected {expected}, got {actual}")]
     FunctionArity {
         name: String,
         expected: usize,
@@ -51,9 +82,10 @@ impl Default for Executor {
         let mut env = Environment::default();
 
         env.push_scope();
-        env.set_prev(SExpr::Integer(BigInt::ZERO));
+        env.set_prev(Value::Integer(BigInt::ZERO));
 
         env.define_native_function("func", builtin_func);
+        env.define_native_function("letFunc", builtin_let_func);
         env.define_native_function("lambda", builtin_lambda);
 
         // Control Flow Functions
@@ -87,38 +119,60 @@ impl Default for Executor {
 }
 
 impl Executor {
-    fn eval(&mut self, expr: &SExpr) -> Result<SExpr, Error> {
-        match expr {
-            SExpr::Atom(name) => self
+    fn eval(&mut self, value: &Value) -> Result<Value, Error> {
+        match value {
+            Value::Atom(name) => self
                 .env
-                .get_variable(name)
+                .get(name)
                 .cloned()
                 .ok_or_else(|| Error::UnknownSymbol(name.clone())),
-            SExpr::List(exprs) => {
+
+            Value::List(exprs) => {
                 if exprs.is_empty() {
                     return Err(Error::FunctionCall);
                 }
 
-                let func_name = match &exprs[0] {
-                    SExpr::Atom(name) => name,
-                    _ => return Err(Error::FunctionCall),
-                };
-
-                let func = self
-                    .env
-                    .get_function(func_name)
-                    .cloned()
-                    .ok_or_else(|| Error::FunctionNotFound(func_name.to_string()))?;
-
+                let caller = &self.eval(&exprs[0])?;
                 let args = &exprs[1..];
 
-                match func {
-                    Function::Native(f) => f(self, args),
-                    Function::UserDefined(f) => {
-                        if args.len() != f.params.len() {
+                // When you use the function call syntax,
+                // you can either pass in a NAME
+
+                match caller {
+                    Value::Function(func) => match func {
+                        Function::Native(f) => f(self, args),
+                        Function::Runtime(f) => {
+                            if args.len() != f.params.len() {
+                                return Err(Error::FunctionArity {
+                                    name: "function".to_string(),
+                                    expected: f.params.len(),
+                                    actual: args.len(),
+                                });
+                            }
+
+                            let values = args
+                                .iter()
+                                .map(|a| self.eval(a))
+                                .collect::<Result<Vec<_>, _>>()?;
+
+                            self.env.push_scope();
+
+                            for (param, value) in f.params.iter().zip(values.iter()) {
+                                self.env.set(param, value.clone());
+                            }
+
+                            let result = self.eval(&f.body);
+
+                            self.env.pop_scope();
+
+                            result
+                        }
+                    },
+                    Value::Lambda(lambda) => {
+                        if args.len() != lambda.params.len() {
                             return Err(Error::FunctionArity {
-                                name: func_name.to_string(),
-                                expected: f.params.len(),
+                                name: "lambda".to_string(),
+                                expected: lambda.params.len(),
                                 actual: args.len(),
                             });
                         }
@@ -128,45 +182,58 @@ impl Executor {
                             .map(|a| self.eval(a))
                             .collect::<Result<Vec<_>, _>>()?;
 
-                        self.env.push_scope();
+                        self.env.push_given_scope(lambda.scope.clone());
 
-                        for (param, value) in f.params.iter().zip(values.iter()) {
-                            self.env.set_variable(param, value.clone());
+                        for (param, value) in lambda.params.iter().zip(values.iter()) {
+                            self.env.set(param, value.clone());
                         }
 
-                        let result = self.eval(&f.body);
+                        let result = self.eval(&lambda.body);
 
                         self.env.pop_scope();
 
                         result
                     }
+                    _ => Err(Error::FunctionCall),
                 }
             }
-            SExpr::Integer(_) | SExpr::Decimal(_) | SExpr::Rational(_) => Ok(expr.clone()),
+            Value::Integer(_)
+            | Value::Decimal(_)
+            | Value::Rational(_)
+            | Value::Lambda(_)
+            | Value::Function(_) => Ok(value.clone()),
         }
     }
 
-    pub fn execute(&mut self, expr: &SExpr) -> Result<SExpr, Error> {
-        let prev = self.eval(expr)?;
+    pub fn execute(&mut self, expr: &SExpr) -> Result<Value, Error> {
+        let prev = self.eval(&expr.clone().into())?;
         self.env.set_prev(prev.clone());
         Ok(prev)
     }
 
-    pub fn print(&self, expr: &SExpr) -> String {
+    pub fn print(&self, expr: &Value) -> String {
         match expr {
-            SExpr::Atom(s) => s.to_string(),
-            SExpr::List(exprs) => {
+            Value::Atom(s) => s.to_string(),
+            Value::List(exprs) => {
                 let items: Vec<String> = exprs.iter().map(|e| self.print(e)).collect();
                 format!("({})", items.join(" "))
             }
-            SExpr::Integer(n) => format!("{n}"),
-            SExpr::Decimal(d) => match self.config.decimal_format {
+            Value::Integer(n) => format!("{n}"),
+            Value::Decimal(d) => match self.config.decimal_format {
                 DecimalFormat::Standard => d.with_prec(self.config.decimal_precision).to_string(),
                 DecimalFormat::Scientific => d
                     .with_prec(self.config.decimal_precision)
                     .to_scientific_notation(),
             },
-            SExpr::Rational(r) => format!("{r}"),
+            Value::Rational(r) => format!("{r}"),
+            Value::Lambda(lambda) => format!("lambda ({})", lambda.params.join(",")),
+            Value::Function(func) => format!(
+                "func ({})",
+                match func {
+                    Function::Native(_) => "native".to_string(),
+                    Function::Runtime(rt) => rt.params.join(","),
+                }
+            ),
         }
     }
 }

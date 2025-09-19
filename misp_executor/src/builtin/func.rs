@@ -1,9 +1,11 @@
 use crate::Error;
 use crate::Executor;
+use crate::Lambda;
+use crate::Value;
+use crate::environment::Function;
 use crate::environment::RuntimeMispFunction;
-use misp_parser::SExpr;
 
-pub fn builtin_func(executor: &mut Executor, args: &[SExpr]) -> Result<SExpr, Error> {
+pub fn builtin_func(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
     if args.len() != 3 {
         return Err(Error::FunctionArity {
             name: "func".to_string(),
@@ -12,16 +14,16 @@ pub fn builtin_func(executor: &mut Executor, args: &[SExpr]) -> Result<SExpr, Er
         });
     }
 
-    let SExpr::Atom(name) = &args[0] else {
+    let Value::Atom(name) = &args[0] else {
         return Err(Error::FunctionCall);
     };
 
     let params = match &args[1] {
-        SExpr::List(param_list) => {
+        Value::List(param_list) => {
             let mut params = Vec::new();
             for param in param_list {
                 match param {
-                    SExpr::Atom(p) => params.push(p.clone()),
+                    Value::Atom(p) => params.push(p.clone()),
                     _ => return Err(Error::FunctionCall),
                 }
             }
@@ -32,36 +34,34 @@ pub fn builtin_func(executor: &mut Executor, args: &[SExpr]) -> Result<SExpr, Er
 
     let body = args[2].clone();
 
-    executor.env.set_function(
-        name,
-        RuntimeMispFunction {
-            params,
-            body: Box::new(body),
-        },
-    );
+    let function = Value::Function(Function::Runtime(RuntimeMispFunction {
+        params,
+        body: Box::new(body),
+    }));
 
-    Ok(SExpr::Atom(name.to_string()))
+    executor.env.set(name, function.clone());
+    Ok(function)
 }
 
-pub fn builtin_lambda(executor: &mut Executor, args: &[SExpr]) -> Result<SExpr, Error> {
+pub fn builtin_let_func(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
     if args.len() != 4 {
         return Err(Error::FunctionArity {
-            name: "lambda".to_string(),
+            name: "letFunc".to_string(),
             expected: 4,
             actual: args.len(),
         });
     }
 
-    let SExpr::Atom(name) = &args[0] else {
+    let Value::Atom(name) = &args[0] else {
         return Err(Error::FunctionCall);
     };
 
     let params = match &args[1] {
-        SExpr::List(param_list) => {
+        Value::List(param_list) => {
             let mut params = Vec::new();
             for param in param_list {
                 match param {
-                    SExpr::Atom(p) => params.push(p.clone()),
+                    Value::Atom(p) => params.push(p.clone()),
                     _ => return Err(Error::FunctionCall),
                 }
             }
@@ -72,13 +72,44 @@ pub fn builtin_lambda(executor: &mut Executor, args: &[SExpr]) -> Result<SExpr, 
 
     let body = args[2].clone();
 
-    executor.env.set_function(
-        name,
-        RuntimeMispFunction {
-            params,
-            body: Box::new(body),
-        },
-    );
+    let function = Value::Function(Function::Runtime(RuntimeMispFunction {
+        params,
+        body: Box::new(body),
+    }));
+
+    executor.env.set(name, function.clone());
 
     executor.eval(&args[3])
+}
+
+pub fn builtin_lambda(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
+    if args.len() != 2 {
+        return Err(Error::FunctionArity {
+            name: "lambda".to_string(),
+            expected: 2,
+            actual: args.len(),
+        });
+    }
+
+    let params = match &args[0] {
+        Value::List(param_list) => {
+            let mut params = Vec::new();
+            for param in param_list {
+                match param {
+                    Value::Atom(p) => params.push(p.clone()),
+                    _ => return Err(Error::FunctionCall),
+                }
+            }
+            params
+        }
+        _ => return Err(Error::FunctionCall),
+    };
+
+    let body = args[1].clone();
+
+    Ok(Value::Lambda(Lambda {
+        params,
+        body: Box::new(body),
+        scope: executor.env.current_scope().clone(),
+    }))
 }
