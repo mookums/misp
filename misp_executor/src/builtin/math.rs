@@ -117,52 +117,40 @@ binary_comparison_op!(builtin_gte, ">=", >=);
 //     Ok(Value::Integer(left % right))
 // }
 
-// pub fn builtin_sqrt(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
-//     if args.len() != 1 {
-//         return Err(Error::FunctionArity {
-//             name: "sqrt".to_string(),
-//             expected: 1,
-//             actual: args.len(),
-//         });
-//     }
+pub fn builtin_sqrt(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
+    if args.len() != 1 {
+        return Err(Error::FunctionArity {
+            name: "sqrt".to_string(),
+            expected: 1,
+            actual: args.len(),
+        });
+    }
 
-//     let inner = executor.eval(&args[0])?;
+    let inner = executor.eval(&args[0])?;
 
-//     match inner {
-//         Value::Integer(n) => {
-//             let result = BigDecimal::from(n).sqrt().unwrap_or(BigDecimal::zero());
+    match inner {
+        Value::Decimal(d) => Ok(Value::Decimal(d.sqrt())),
+        _ => Err(Error::FunctionCall),
+    }
+}
 
-//             if result.is_integer() {
-//                 let (value, _) = result.with_scale(0).into_bigint_and_exponent();
-//                 Ok(Value::Integer(value))
-//             } else {
-//                 Ok(Value::Decimal(result))
-//             }
-//         }
-//         Value::Decimal(d) => Ok(Value::Decimal(d.sqrt().unwrap_or(BigDecimal::zero()))),
-//         _ => Err(Error::FunctionCall),
-//     }
-// }
+pub fn builtin_pow(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
+    if args.len() != 2 {
+        return Err(Error::FunctionArity {
+            name: "pow".to_string(),
+            expected: 2,
+            actual: args.len(),
+        });
+    }
 
-// pub fn builtin_pow(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
-//     if args.len() != 2 {
-//         return Err(Error::FunctionArity {
-//             name: "pow".to_string(),
-//             expected: 2,
-//             actual: args.len(),
-//         });
-//     }
+    let Value::Decimal(left) = executor.eval(&args[0])? else {
+        return Err(Error::FunctionCall);
+    };
 
-//     let Value::Integer(left) = executor.eval(&args[0])? else {
-//         return Err(Error::FunctionCall);
-//     };
-//     let left_int = left.to_u32().unwrap();
+    let right = executor.eval(&args[1])?;
 
-//     let right = executor.eval(&args[1])?;
-
-//     match right {
-//         Value::Integer(n) => Ok(Value::Integer(n.pow(left_int))),
-//         Value::Rational(r) => Ok(Value::Rational(r.pow(left_int as i32))),
-//         _ => todo!("Unsupported type for pow"),
-//     }
-// }
+    match right {
+        Value::Decimal(d) => Ok(Value::Decimal(d.pow(left))),
+        _ => todo!("Unsupported type for pow"),
+    }
+}

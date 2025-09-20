@@ -18,7 +18,7 @@ use crate::{
     builtin::{
         control::builtin_let,
         func::{builtin_lambda, builtin_let_func},
-        math::builtin_not_equal,
+        math::{builtin_not_equal, builtin_pow, builtin_sqrt},
     },
     config::Config,
     environment::{Environment, Scope},
@@ -92,6 +92,8 @@ impl Default for Executor {
 
         env.push_scope();
         env.set_prev(Value::Decimal(Decimal::ZERO));
+        env.set("pi", Value::Decimal(Decimal::PI));
+        env.set("e", Value::Decimal(Decimal::E));
 
         env.define_native_function("func", builtin_func);
         env.define_native_function("letFunc", builtin_let_func);
@@ -113,8 +115,8 @@ impl Default for Executor {
         env.define_native_function("<=", builtin_lte);
         env.define_native_function(">", builtin_gt);
         env.define_native_function(">=", builtin_gte);
-        // env.define_native_function("pow", builtin_pow);
-        // env.define_native_function("sqrt", builtin_sqrt);
+        env.define_native_function("pow", builtin_pow);
+        env.define_native_function("sqrt", builtin_sqrt);
 
         // Trig Functions
         // env.define_native_function("sin", builtin_sin);
