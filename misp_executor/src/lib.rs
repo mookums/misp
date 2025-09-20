@@ -153,7 +153,7 @@ impl Executor {
                         Function::Runtime(f) => {
                             if args.len() != f.params.len() {
                                 return Err(Error::FunctionArity {
-                                    name: self.print(caller),
+                                    name: Self::print(caller),
                                     expected: f.params.len(),
                                     actual: args.len(),
                                 });
@@ -180,7 +180,7 @@ impl Executor {
                     Value::Lambda(lambda) => {
                         if args.len() != lambda.params.len() {
                             return Err(Error::FunctionArity {
-                                name: self.print(caller),
+                                name: Self::print(caller),
                                 expected: lambda.params.len(),
                                 actual: args.len(),
                             });
@@ -216,11 +216,11 @@ impl Executor {
         Ok(prev)
     }
 
-    pub fn print(&self, value: &Value) -> String {
+    pub fn print(value: &Value) -> String {
         match value {
             Value::Atom(s) => s.to_string(),
             Value::List(exprs) => {
-                let items: Vec<String> = exprs.iter().map(|e| self.print(e)).collect();
+                let items: Vec<String> = exprs.iter().map(Self::print).collect();
                 format!("({})", items.join(" "))
             }
             // Value::Decimal(d) => match self.config.decimal_format {

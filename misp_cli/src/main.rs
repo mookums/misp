@@ -101,7 +101,7 @@ impl App {
 
         for sexpr in sexprs {
             match self.executor.execute(&sexpr) {
-                Ok(value) => self.history.push(self.executor.print(&value)),
+                Ok(value) => self.history.push(Executor::print(&value)),
                 Err(err) => self.history.push(format!("{}", err)),
             }
         }

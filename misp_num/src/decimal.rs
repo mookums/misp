@@ -14,6 +14,8 @@ pub struct Decimal {
 }
 
 impl Decimal {
+    pub const MAX_PRECISION: i32 = 18;
+
     pub const ZERO: Decimal = Decimal {
         value: 0,
         scale: 0,
@@ -28,13 +30,13 @@ impl Decimal {
 
     pub const PI: Decimal = Decimal {
         value: 3141592653589793238,
-        scale: 18,
+        scale: Decimal::MAX_PRECISION,
         sign: Sign::Positive,
     };
 
     pub const E: Decimal = Decimal {
         value: 2718281828459045235,
-        scale: 18,
+        scale: Decimal::MAX_PRECISION,
         sign: Sign::Positive,
     };
 
@@ -53,6 +55,14 @@ impl Decimal {
             Decimal::new(signed as u64, 0, Sign::Positive)
         } else {
             Decimal::new(signed.unsigned_abs(), 0, Sign::Negative)
+        }
+    }
+
+    pub fn negate(self) -> Decimal {
+        Decimal {
+            value: self.value,
+            scale: self.scale,
+            sign: self.sign.negate(),
         }
     }
 
@@ -195,9 +205,11 @@ impl Decimal {
     }
 
     fn perfect_square(self) -> Option<Decimal> {
-        if !self.is_integer() || self.sign == Sign::Negative {
+        // Using binary search to find a potential perfect square.
+        // O(log n)
+        if !self.is_integer() {
             return None;
-        };
+        }
 
         let int_value: i128 = if self.scale <= 0 {
             (self.value as i128) * 10_i128.pow(self.scale.unsigned_abs())
@@ -205,30 +217,57 @@ impl Decimal {
             (self.value as i128) / 10_i128.pow(self.scale.unsigned_abs())
         };
 
-        if int_value == 0 {
-            return Some(Decimal::ZERO);
-        } else if int_value == 1 {
-            return Some(Decimal::ONE);
+        let mut low = 0;
+        let mut high = int_value;
+
+        while low <= high {
+            let mid = (low + high) / 2;
+            let squared = mid * mid;
+
+            match squared.cmp(&int_value) {
+                std::cmp::Ordering::Equal => return Some(Decimal::from_unsigned(mid as u64)),
+                std::cmp::Ordering::Less => low = mid + 1,
+                std::cmp::Ordering::Greater => high = mid - 1,
+            }
         }
 
-        let mut x = int_value;
-        let mut prev = 0;
-
-        while x != prev {
-            prev = x;
-            x = (x + int_value / x) / 2;
-        }
-
-        // Check if it's actually a perfect square
-        if x * x == int_value {
-            // This is always safe.
-            // sqrt i128::MAX is 1.30 * 10^19
-            // u64::MAX is 1.84 * 10^19 :)
-            Some(Decimal::from_unsigned(x as u64))
-        } else {
-            None
-        }
+        None
     }
+
+    // fn perfect_square(self) -> Option<Decimal> {
+    //     if !self.is_integer() || self.sign == Sign::Negative {
+    //         return None;
+    //     };
+
+    //     let int_value: i128 = if self.scale <= 0 {
+    //         (self.value as i128) * 10_i128.pow(self.scale.unsigned_abs())
+    //     } else {
+    //         (self.value as i128) / 10_i128.pow(self.scale.unsigned_abs())
+    //     };
+
+    //     if int_value == 0 {
+    //         return Some(Decimal::ZERO);
+    //     } else if int_value == 1 {
+    //         return Some(Decimal::ONE);
+    //     }
+
+    //     let mut x = int_value;
+    //     loop {
+    //         let next_x = (x + int_value / x) / 2;
+    //         if next_x >= x {
+    //             // Converged or started oscillating
+    //             break;
+    //         }
+    //         x = next_x;
+    //     }
+
+    //     // Check if it's actually a perfect square
+    //     if x * x == int_value {
+    //         Some(Decimal::from_unsigned(x as u64))
+    //     } else {
+    //         None
+    //     }
+    // }
 
     pub fn sqrt(self) -> Decimal {
         // Using Newton-Raphson estimation.
@@ -247,14 +286,17 @@ impl Decimal {
 
         // If we are larger than roughly sqrt 2, better to 1/2 it.
         // Otherwise, self is a fine guess...
-        let mut current = if self > Decimal::new(14, 1, Sign::Positive) {
-            self / 2
+
+        let int_value: i128 = if self.scale <= 0 {
+            (self.value as i128) * 10_i128.pow(self.scale.unsigned_abs())
         } else {
-            self
+            (self.value as i128) / 10_i128.pow(self.scale.unsigned_abs())
         };
 
+        let mut current = Decimal::from_unsigned(int_value.isqrt() as u64);
+
         // TODO: Probably make this configurable...?
-        for _ in 0..30 {
+        for _ in 0..10 {
             let curr_squared = current.pow(2);
             let numerator = curr_squared - self;
             let denominator = 2 * current;
@@ -531,22 +573,7 @@ impl Div for Decimal {
             (Sign::Positive, Sign::Negative) | (Sign::Negative, Sign::Positive) => Sign::Negative,
         };
 
-        let mut working_dividend = self.value;
-        let mut working_scale = self.scale - rhs.scale;
-
-        while working_dividend <= u64::MAX / 10 && working_dividend % rhs.value != 0 {
-            working_dividend *= 10;
-            working_scale += 1;
-        }
-
-        let quotient = working_dividend / rhs.value;
-
-        Decimal {
-            value: quotient,
-            scale: working_scale,
-            sign,
-        }
-        .normalize()
+        todo!()
     }
 }
 
