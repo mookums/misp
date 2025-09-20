@@ -1,6 +1,4 @@
 use crate::{Error, Executor, Value, config::AngleMode};
-use bigdecimal::BigDecimal;
-use num::{FromPrimitive, ToPrimitive};
 
 macro_rules! trig_op {
     ($name:ident, $op_name:literal, $op:tt) => {
@@ -15,9 +13,7 @@ macro_rules! trig_op {
 
             let arg = executor.eval(&args[0])?;
             let value_f64: f64 = match &arg {
-                Value::Integer(n) => n.to_f64().unwrap(),
                 Value::Decimal(d) => d.to_f64().unwrap(),
-                Value::Rational(r) => r.to_f64().unwrap(),
                 _ => return Err(Error::FunctionCall),
             };
 
@@ -46,9 +42,7 @@ macro_rules! inverse_trig_op {
             let arg = executor.eval(&args[0])?;
 
             let value_f64: f64 = match &arg {
-                Value::Integer(n) => n.to_f64().unwrap(),
                 Value::Decimal(d) => d.to_f64().unwrap(),
-                Value::Rational(r) => r.to_f64().unwrap(),
                 _ => return Err(Error::FunctionCall),
             };
 
@@ -64,10 +58,10 @@ macro_rules! inverse_trig_op {
     };
 }
 
-trig_op!(builtin_sin, "sin", sin);
-trig_op!(builtin_cos, "cos", cos);
-trig_op!(builtin_tan, "tan", tan);
+// trig_op!(builtin_sin, "sin", sin);
+// trig_op!(builtin_cos, "cos", cos);
+// trig_op!(builtin_tan, "tan", tan);
 
-inverse_trig_op!(builtin_asin, "asin", asin);
-inverse_trig_op!(builtin_acos, "acos", acos);
-inverse_trig_op!(builtin_atan, "atan", atan);
+// inverse_trig_op!(builtin_asin, "asin", asin);
+// inverse_trig_op!(builtin_acos, "acos", acos);
+// inverse_trig_op!(builtin_atan, "atan", atan);

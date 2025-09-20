@@ -1,5 +1,6 @@
+use misp_num::decimal::Decimal;
+
 use crate::{Error, Executor, Value};
-use num::BigInt;
 
 pub fn builtin_if(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
     if args.len() != 3 {
@@ -11,11 +12,11 @@ pub fn builtin_if(executor: &mut Executor, args: &[Value]) -> Result<Value, Erro
     }
 
     // (if cond first second)
-    let Value::Integer(condition) = executor.eval(&args[0])? else {
+    let Value::Decimal(condition) = executor.eval(&args[0])? else {
         return Err(Error::FunctionCall);
     };
 
-    if condition != BigInt::ZERO {
+    if condition != Decimal::ZERO {
         let first = executor.eval(&args[1])?;
         Ok(first)
     } else {

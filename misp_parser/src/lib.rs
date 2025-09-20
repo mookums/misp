@@ -1,8 +1,7 @@
 use std::{collections::VecDeque, fmt::Display};
 
-use bigdecimal::BigDecimal;
 use misp_lexer::Token;
-use num::{BigInt, BigRational};
+use misp_num::decimal::Decimal;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -15,9 +14,7 @@ pub enum SExpr {
     Atom(String),
     List(Vec<SExpr>),
 
-    Integer(BigInt),
-    Decimal(BigDecimal),
-    Rational(BigRational),
+    Decimal(Decimal),
 }
 
 pub struct Parser {
@@ -46,8 +43,6 @@ impl Parser {
 
         match next {
             Token::Ident(data) => Ok(SExpr::Atom(data)),
-            Token::Integer(integer) => Ok(SExpr::Integer(integer)),
-            Token::Rational(rational) => Ok(SExpr::Rational(rational)),
             Token::Decimal(decimal) => Ok(SExpr::Decimal(decimal)),
             Token::LeftParen => {
                 let mut exprs = Vec::new();
@@ -88,9 +83,7 @@ impl Display for SExpr {
                 let items: Vec<String> = exprs.iter().map(|e| e.to_string()).collect();
                 write!(f, "({})", items.join(" "))
             }
-            SExpr::Integer(n) => write!(f, "{n}"),
             SExpr::Decimal(d) => write!(f, "{d}",),
-            SExpr::Rational(r) => write!(f, "{r}"),
         }
     }
 }

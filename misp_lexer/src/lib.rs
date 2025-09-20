@@ -1,7 +1,4 @@
-use std::str::FromStr;
-
-use bigdecimal::BigDecimal;
-use num::{BigInt, BigRational};
+use misp_num::decimal::Decimal;
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,9 +7,7 @@ pub enum Token {
     RightParen,
     Ident(String),
 
-    Integer(BigInt),
-    Decimal(BigDecimal),
-    Rational(BigRational),
+    Decimal(Decimal),
 }
 
 #[derive(Debug, Error)]
@@ -90,17 +85,8 @@ impl Lexer {
         {
             return None;
         }
-        let token = if token_str.contains('.') {
-            let decimal = BigDecimal::from_str(token_str).ok()?;
-            Token::Decimal(decimal)
-        } else if token_str.contains('/') {
-            let rational = BigRational::from_str(token_str).ok()?;
-            Token::Rational(rational)
-        } else {
-            let integer = BigInt::from_str(token_str).ok()?;
-            Token::Integer(integer)
-        };
 
+        let token = Token::Decimal(token_str.parse().ok()?);
         self.column += token_str.chars().count();
         Some((remaining, token))
     }
@@ -188,8 +174,8 @@ mod tests {
         let mut kinds = tokens.iter();
         assert_eq!(kinds.next().unwrap(), &Token::LeftParen);
         assert_eq!(kinds.next().unwrap(), &Token::Ident("+".to_string()));
-        assert_eq!(kinds.next().unwrap(), &Token::Integer(BigInt::from(10)));
-        assert_eq!(kinds.next().unwrap(), &Token::Integer(BigInt::from(4)));
+        assert_eq!(kinds.next().unwrap(), &Token::Decimal(Decimal::from(10)));
+        assert_eq!(kinds.next().unwrap(), &Token::Decimal(Decimal::from(4)));
         assert_eq!(kinds.next().unwrap(), &Token::RightParen);
     }
 
@@ -204,10 +190,10 @@ mod tests {
         assert_eq!(kinds.next().unwrap(), &Token::Ident("+".to_string()));
         assert_eq!(kinds.next().unwrap(), &Token::LeftParen);
         assert_eq!(kinds.next().unwrap(), &Token::Ident("*".to_string()));
-        assert_eq!(kinds.next().unwrap(), &Token::Integer(BigInt::from(10)));
-        assert_eq!(kinds.next().unwrap(), &Token::Integer(BigInt::from(15)));
+        assert_eq!(kinds.next().unwrap(), &Token::Decimal(Decimal::from(10)));
+        assert_eq!(kinds.next().unwrap(), &Token::Decimal(Decimal::from(15)));
         assert_eq!(kinds.next().unwrap(), &Token::RightParen);
-        assert_eq!(kinds.next().unwrap(), &Token::Integer(BigInt::from(4)));
+        assert_eq!(kinds.next().unwrap(), &Token::Decimal(Decimal::from(4)));
         assert_eq!(kinds.next().unwrap(), &Token::RightParen);
     }
 }

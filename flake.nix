@@ -32,6 +32,7 @@
         devShells.default = craneLib.devShell {
           packages = with pkgs; [
             rustToolchain
+            cargo-expand
             cargo-hakari
           ];
         };

@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 misp_lexer = { path = "../misp_lexer" }
+misp_num = { path = "../misp_num" }
 
-num.workspace = true
-bigdecimal.workspace = true
 thiserror.workspace = true

@@ -2,16 +2,15 @@ mod builtin;
 pub mod config;
 pub mod environment;
 
-use bigdecimal::BigDecimal;
+use misp_num::decimal::Decimal;
 use misp_parser::SExpr;
-use num::{BigInt, BigRational};
 
 use builtin::{
     control::builtin_if,
     func::builtin_func,
     math::{
         builtin_add, builtin_divide, builtin_equal, builtin_gt, builtin_gte, builtin_lt,
-        builtin_lte, builtin_minus, builtin_multiply, builtin_pow, builtin_sqrt,
+        builtin_lte, builtin_minus, builtin_multiply,
     },
 };
 
@@ -19,10 +18,9 @@ use crate::{
     builtin::{
         control::builtin_let,
         func::{builtin_lambda, builtin_let_func},
-        math::{builtin_mod, builtin_not_equal},
-        trig::{builtin_acos, builtin_asin, builtin_atan, builtin_cos, builtin_sin, builtin_tan},
+        math::builtin_not_equal,
     },
-    config::{Config, DecimalFormat},
+    config::Config,
     environment::{Environment, Scope},
 };
 
@@ -51,9 +49,7 @@ pub enum Function {
 pub enum Value {
     Atom(String),
     List(Vec<Value>),
-    Integer(BigInt),
-    Decimal(BigDecimal),
-    Rational(BigRational),
+    Decimal(Decimal),
     Lambda(Lambda),
     Function(Function),
 }
@@ -63,9 +59,7 @@ impl From<SExpr> for Value {
         match value {
             SExpr::Atom(str) => Value::Atom(str),
             SExpr::List(sexprs) => Value::List(sexprs.into_iter().map(|e| e.into()).collect()),
-            SExpr::Integer(n) => Value::Integer(n),
             SExpr::Decimal(d) => Value::Decimal(d),
-            SExpr::Rational(r) => Value::Rational(r),
         }
     }
 }
@@ -82,8 +76,8 @@ pub enum Error {
         expected: usize,
         actual: usize,
     },
-    #[error("Function not found: {0}")]
-    FunctionNotFound(String),
+    #[error("Function not found")]
+    FunctionNotFound,
 }
 
 pub struct Executor {
@@ -97,7 +91,7 @@ impl Default for Executor {
         let mut env = Environment::default();
 
         env.push_scope();
-        env.set_prev(Value::Integer(BigInt::ZERO));
+        env.set_prev(Value::Decimal(Decimal::ZERO));
 
         env.define_native_function("func", builtin_func);
         env.define_native_function("letFunc", builtin_let_func);
@@ -112,23 +106,23 @@ impl Default for Executor {
         env.define_native_function("-", builtin_minus);
         env.define_native_function("*", builtin_multiply);
         env.define_native_function("/", builtin_divide);
-        env.define_native_function("%", builtin_mod);
+        // env.define_native_function("%", builtin_mod);
         env.define_native_function("==", builtin_equal);
         env.define_native_function("!=", builtin_not_equal);
         env.define_native_function("<", builtin_lt);
         env.define_native_function("<=", builtin_lte);
         env.define_native_function(">", builtin_gt);
         env.define_native_function(">=", builtin_gte);
-        env.define_native_function("pow", builtin_pow);
-        env.define_native_function("sqrt", builtin_sqrt);
+        // env.define_native_function("pow", builtin_pow);
+        // env.define_native_function("sqrt", builtin_sqrt);
 
         // Trig Functions
-        env.define_native_function("sin", builtin_sin);
-        env.define_native_function("cos", builtin_cos);
-        env.define_native_function("tan", builtin_tan);
-        env.define_native_function("asin", builtin_asin);
-        env.define_native_function("acos", builtin_acos);
-        env.define_native_function("atan", builtin_atan);
+        // env.define_native_function("sin", builtin_sin);
+        // env.define_native_function("cos", builtin_cos);
+        // env.define_native_function("tan", builtin_tan);
+        // env.define_native_function("asin", builtin_asin);
+        // env.define_native_function("acos", builtin_acos);
+        // env.define_native_function("atan", builtin_atan);
 
         Self { config, env }
     }
@@ -207,14 +201,10 @@ impl Executor {
 
                         result
                     }
-                    _ => Err(Error::FunctionCall),
+                    _ => Err(Error::FunctionNotFound),
                 }
             }
-            Value::Integer(_)
-            | Value::Decimal(_)
-            | Value::Rational(_)
-            | Value::Lambda(_)
-            | Value::Function(_) => Ok(value.clone()),
+            Value::Decimal(_) | Value::Lambda(_) | Value::Function(_) => Ok(value.clone()),
         }
     }
 
@@ -231,14 +221,13 @@ impl Executor {
                 let items: Vec<String> = exprs.iter().map(|e| self.print(e)).collect();
                 format!("({})", items.join(" "))
             }
-            Value::Integer(n) => format!("{n}"),
-            Value::Decimal(d) => match self.config.decimal_format {
-                DecimalFormat::Standard => d.with_prec(self.config.decimal_precision).to_string(),
-                DecimalFormat::Scientific => d
-                    .with_prec(self.config.decimal_precision)
-                    .to_scientific_notation(),
-            },
-            Value::Rational(r) => format!("{r}"),
+            // Value::Decimal(d) => match self.config.decimal_format {
+            //     DecimalFormat::Standard => d.with_prec(self.config.decimal_precision).to_string(),
+            //     DecimalFormat::Scientific => d
+            //         .with_prec(self.config.decimal_precision)
+            //         .to_scientific_notation(),
+            // },
+            Value::Decimal(d) => format!("{d}"),
             Value::Lambda(lambda) => format!("lambda ({})", lambda.params.join(", ")),
             Value::Function(func) => format!(
                 "func ({})",
