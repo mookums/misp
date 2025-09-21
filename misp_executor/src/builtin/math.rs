@@ -173,3 +173,30 @@ pub fn builtin_summate(executor: &mut Executor, args: &[Value]) -> Result<Value,
 
     Ok(Value::Decimal(ret))
 }
+
+pub fn builtin_factorial(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
+    if args.len() != 1 {
+        return Err(Error::FunctionArity {
+            name: "factorial".to_string(),
+            expected: 1,
+            actual: args.len(),
+        });
+    }
+
+    let Value::Decimal(n) = executor.evaluate(&args[0])? else {
+        return Err(Error::FunctionCall);
+    };
+
+    let count = n.to_u128() as u64;
+
+    if count == 0 || count == 1 {
+        return Ok(Value::Decimal(Decimal::ONE));
+    }
+
+    let mut result = Decimal::ONE;
+    for i in 2..=count {
+        result *= Decimal::from_unsigned(i)
+    }
+
+    Ok(Value::Decimal(result))
+}

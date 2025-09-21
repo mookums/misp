@@ -265,6 +265,78 @@ impl Decimal {
 
         current.normalize()
     }
+
+    pub fn to_scientific_notation(self) -> String {
+        let num_str = self.value.to_string();
+        let total_digits = num_str.len();
+        let decimal_pos = total_digits as i32 - self.scale;
+
+        let exponent = decimal_pos - 1;
+
+        let mantissa_digits: String = num_str
+            .chars()
+            .take((Decimal::MAX_PRECISION as usize).min(total_digits))
+            .collect();
+
+        let mantissa = if mantissa_digits.len() == 1 {
+            mantissa_digits
+        } else {
+            let decimal_part = &mantissa_digits[1..];
+            let trimmed_decimal = decimal_part.trim_end_matches('0');
+
+            if trimmed_decimal.is_empty() {
+                format!("{}.0", mantissa_digits.chars().next().unwrap())
+            } else {
+                format!(
+                    "{}.{}",
+                    mantissa_digits.chars().next().unwrap(),
+                    trimmed_decimal
+                )
+            }
+        };
+
+        if exponent == 0 {
+            format!("{}{mantissa}", self.sign)
+        } else {
+            format!("{}{mantissa}E{exponent}", self.sign)
+        }
+    }
+
+    pub fn to_scientific_notation_alternate(self) -> String {
+        let num_str = self.value.to_string();
+        let total_digits = num_str.len();
+        let decimal_pos = total_digits as i32 - self.scale;
+
+        let exponent = decimal_pos - 1;
+
+        let mantissa_digits: String = num_str
+            .chars()
+            .take((Decimal::MAX_PRECISION as usize).min(total_digits))
+            .collect();
+
+        let mantissa = if mantissa_digits.len() == 1 {
+            mantissa_digits
+        } else {
+            let decimal_part = &mantissa_digits[1..];
+            let trimmed_decimal = decimal_part.trim_end_matches('0');
+
+            if trimmed_decimal.is_empty() {
+                format!("{}.0", mantissa_digits.chars().next().unwrap())
+            } else {
+                format!(
+                    "{}.{}",
+                    mantissa_digits.chars().next().unwrap(),
+                    trimmed_decimal
+                )
+            }
+        };
+
+        if exponent == 0 {
+            format!("{}{mantissa}", self.sign)
+        } else {
+            format!("{}{mantissa} * 10^{exponent}", self.sign)
+        }
+    }
 }
 
 impl PartialEq for Decimal {

@@ -51,7 +51,7 @@ impl Misp {
                 let items: Vec<String> = exprs.iter().map(Self::print).collect();
                 format!("({})", items.join(" "))
             }
-            Value::Decimal(d) => format!("{d}"),
+            Value::Decimal(d) => d.to_scientific_notation(),
             // Value::Decimal(d) => format!("{d:?}"),
             Value::Function(func) => match func {
                 Function::Native(_) => "<native>".to_string(),

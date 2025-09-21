@@ -5,20 +5,15 @@ pub mod environment;
 use misp_num::decimal::Decimal;
 use misp_parser::SExpr;
 
-use builtin::{
-    control::builtin_if,
-    func::builtin_func,
-    math::{
-        builtin_add, builtin_divide, builtin_equal, builtin_gt, builtin_gte, builtin_lt,
-        builtin_lte, builtin_minus, builtin_multiply,
-    },
-};
-
 use crate::{
     builtin::{
-        control::builtin_let,
-        func::{builtin_lambda, builtin_let_func},
-        math::{builtin_not_equal, builtin_pow, builtin_sqrt, builtin_summate},
+        control::{builtin_if, builtin_let},
+        func::{builtin_func, builtin_lambda, builtin_let_func},
+        math::{
+            builtin_add, builtin_divide, builtin_equal, builtin_factorial, builtin_gt, builtin_gte,
+            builtin_lt, builtin_lte, builtin_minus, builtin_multiply, builtin_not_equal,
+            builtin_pow, builtin_sqrt, builtin_summate,
+        },
     },
     config::Config,
     environment::{Environment, Scope},
@@ -78,12 +73,15 @@ pub enum Error {
     },
     #[error("Function not found")]
     FunctionNotFound,
+    #[error("Recursion limit reached")]
+    Recursion,
 }
 
 #[derive(Debug, Clone)]
 pub struct Executor {
     pub config: Config,
     pub env: Environment,
+    pub call_depth: u32,
 }
 
 impl Default for Executor {
@@ -119,6 +117,7 @@ impl Default for Executor {
         env.define_native_function("pow", builtin_pow);
         env.define_native_function("sqrt", builtin_sqrt);
         env.define_native_function("summate", builtin_summate);
+        env.define_native_function("factorial", builtin_factorial);
 
         // Trig Functions
         // env.define_native_function("sin", builtin_sin);
@@ -128,13 +127,22 @@ impl Default for Executor {
         // env.define_native_function("acos", builtin_acos);
         // env.define_native_function("atan", builtin_atan);
 
-        Self { config, env }
+        Self {
+            config,
+            env,
+            call_depth: 0,
+        }
     }
 }
 
 impl Executor {
     fn evaluate(&mut self, value: &Value) -> Result<Value, Error> {
-        match value {
+        if self.call_depth >= self.config.recursion_limit {
+            return Err(Error::Recursion);
+        }
+
+        self.call_depth += 1;
+        let res = match value {
             Value::Atom(name) => self
                 .env
                 .get(name)
@@ -155,7 +163,10 @@ impl Executor {
                 }
             }
             Value::Decimal(_) | Value::Function(_) => Ok(value.clone()),
-        }
+        };
+
+        self.call_depth -= 1;
+        res
     }
 
     pub fn execute(&mut self, expr: &SExpr) -> Result<Value, Error> {
