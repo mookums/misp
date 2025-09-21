@@ -12,15 +12,15 @@ pub fn builtin_if(executor: &mut Executor, args: &[Value]) -> Result<Value, Erro
     }
 
     // (if cond first second)
-    let Value::Decimal(condition) = executor.eval(&args[0])? else {
+    let Value::Decimal(condition) = executor.evaluate(&args[0])? else {
         return Err(Error::FunctionCall);
     };
 
     if condition != Decimal::ZERO {
-        let first = executor.eval(&args[1])?;
+        let first = executor.evaluate(&args[1])?;
         Ok(first)
     } else {
-        let second = executor.eval(&args[2])?;
+        let second = executor.evaluate(&args[2])?;
         Ok(second)
     }
 }
@@ -43,7 +43,7 @@ pub fn builtin_let(executor: &mut Executor, args: &[Value]) -> Result<Value, Err
     executor.env.push_scope();
 
     executor.env.set(name, value.clone());
-    let result = executor.eval(&args[2]);
+    let result = executor.evaluate(&args[2]);
 
     executor.env.pop_scope();
     result

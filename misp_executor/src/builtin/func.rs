@@ -80,7 +80,7 @@ pub fn builtin_let_func(executor: &mut Executor, args: &[Value]) -> Result<Value
     executor.env.push_scope();
 
     executor.env.set(name, function.clone());
-    let result = executor.eval(&args[3]);
+    let result = executor.evaluate(&args[3]);
 
     executor.env.pop_scope();
     result

@@ -451,6 +451,7 @@ dependencies = [
 name = "misp_interp"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "misp_executor",
  "misp_lexer",
  "misp_parser",

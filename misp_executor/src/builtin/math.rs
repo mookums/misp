@@ -20,8 +20,8 @@ macro_rules! binary_op {
                 });
             }
 
-            let left = executor.eval(&args[0])?;
-            let right = executor.eval(&args[1])?;
+            let left = executor.evaluate(&args[0])?;
+            let right = executor.evaluate(&args[1])?;
 
             match (left, right) {
                 (Value::Decimal(a), Value::Decimal(b)) => Ok(Value::Decimal(a $op b)),
@@ -42,8 +42,8 @@ macro_rules! binary_comparison_op {
                 });
             }
 
-            let left = executor.eval(&args[0])?;
-            let right = executor.eval(&args[1])?;
+            let left = executor.evaluate(&args[0])?;
+            let right = executor.evaluate(&args[1])?;
 
             let result = match (left, right) {
                 (Value::Decimal(a), Value::Decimal(b)) => a $op b,
@@ -126,7 +126,7 @@ pub fn builtin_sqrt(executor: &mut Executor, args: &[Value]) -> Result<Value, Er
         });
     }
 
-    let inner = executor.eval(&args[0])?;
+    let inner = executor.evaluate(&args[0])?;
 
     match inner {
         Value::Decimal(d) => Ok(Value::Decimal(d.sqrt())),
@@ -143,11 +143,11 @@ pub fn builtin_pow(executor: &mut Executor, args: &[Value]) -> Result<Value, Err
         });
     }
 
-    let Value::Decimal(left) = executor.eval(&args[0])? else {
+    let Value::Decimal(left) = executor.evaluate(&args[0])? else {
         return Err(Error::FunctionCall);
     };
 
-    let right = executor.eval(&args[1])?;
+    let right = executor.evaluate(&args[1])?;
 
     match right {
         Value::Decimal(d) => Ok(Value::Decimal(d.pow(left))),
@@ -164,18 +164,18 @@ pub fn builtin_summate(executor: &mut Executor, args: &[Value]) -> Result<Value,
         });
     }
 
-    let Value::Decimal(start) = executor.eval(&args[0])? else {
+    let Value::Decimal(start) = executor.evaluate(&args[0])? else {
         return Err(Error::FunctionCall);
     };
 
-    let Value::Decimal(end) = executor.eval(&args[1])? else {
+    let Value::Decimal(end) = executor.evaluate(&args[1])? else {
         return Err(Error::FunctionCall);
     };
 
     let mut start = start.to_u128() as u64;
     let end = end.to_u128() as u64;
 
-    let ret = match executor.eval(&args[2])? {
+    let ret = match executor.evaluate(&args[2])? {
         Value::Function(function) => {
             let mut sum = Decimal::ZERO;
 

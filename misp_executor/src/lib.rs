@@ -133,7 +133,7 @@ impl Default for Executor {
 }
 
 impl Executor {
-    fn eval(&mut self, value: &Value) -> Result<Value, Error> {
+    fn evaluate(&mut self, value: &Value) -> Result<Value, Error> {
         match value {
             Value::Atom(name) => self
                 .env
@@ -146,7 +146,7 @@ impl Executor {
                     return Err(Error::FunctionCall);
                 }
 
-                let caller = &self.eval(&exprs[0])?;
+                let caller = &self.evaluate(&exprs[0])?;
                 let args = &exprs[1..];
 
                 match caller {
@@ -159,7 +159,7 @@ impl Executor {
     }
 
     pub fn execute(&mut self, expr: &SExpr) -> Result<Value, Error> {
-        let prev = self.eval(&expr.clone().into())?;
+        let prev = self.evaluate(&expr.clone().into())?;
         self.env.set_prev(prev.clone());
         Ok(prev)
     }
@@ -178,7 +178,7 @@ impl Executor {
 
                 let values = args
                     .iter()
-                    .map(|a| self.eval(a))
+                    .map(|a| self.evaluate(a))
                     .collect::<Result<Vec<_>, _>>()?;
 
                 self.env.push_scope();
@@ -187,7 +187,7 @@ impl Executor {
                     self.env.set(param, value.clone());
                 }
 
-                let result = self.eval(&f.body);
+                let result = self.evaluate(&f.body);
 
                 self.env.pop_scope();
 
@@ -204,7 +204,7 @@ impl Executor {
 
                 let values = args
                     .iter()
-                    .map(|a| self.eval(a))
+                    .map(|a| self.evaluate(a))
                     .collect::<Result<Vec<_>, _>>()?;
 
                 self.env.push_given_scope(l.scope.clone());
@@ -213,7 +213,7 @@ impl Executor {
                     self.env.set(param, value.clone());
                 }
 
-                let result = self.eval(&l.body);
+                let result = self.evaluate(&l.body);
 
                 self.env.pop_scope();
 
