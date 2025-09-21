@@ -18,15 +18,15 @@ macro_rules! binary_op {
 }
 
 binary_op!(builtin_add, "+", +);
-// binary_op!(builtin_minus, "-", -);
-// binary_op!(builtin_multiply, "*", *);
-// binary_op!(builtin_divide, "/", /);
-// binary_op!(builtin_equal, "==", ==);
-// binary_op!(builtin_not_equal, "!=", !=);
-// binary_op!(builtin_lt, "<", <);
-// binary_op!(builtin_lte, "<=", <=);
-// binary_op!(builtin_gt, ">", >);
-// binary_op!(builtin_gte, ">=", >=);
+binary_op!(builtin_minus, "-", -);
+binary_op!(builtin_multiply, "*", *);
+binary_op!(builtin_divide, "/", /);
+binary_op!(builtin_equal, "==", ==);
+binary_op!(builtin_not_equal, "!=", !=);
+binary_op!(builtin_lt, "<", <);
+binary_op!(builtin_lte, "<=", <=);
+binary_op!(builtin_gt, ">", >);
+binary_op!(builtin_gte, ">=", >=);
 
 // pub fn builtin_mod(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
 //     if args.len() != 2 {
