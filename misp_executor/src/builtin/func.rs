@@ -111,9 +111,9 @@ pub fn builtin_lambda(executor: &mut Executor, args: &[Value]) -> Result<Value, 
 
     let body = args[1].clone();
 
-    Ok(Value::Lambda(Lambda {
+    Ok(Value::Function(Function::Lambda(Lambda {
         params,
         body: Box::new(body),
         scope: executor.env.current_scope().clone(),
-    }))
+    })))
 }

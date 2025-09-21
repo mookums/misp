@@ -18,7 +18,7 @@ use crate::{
     builtin::{
         control::builtin_let,
         func::{builtin_lambda, builtin_let_func},
-        math::{builtin_not_equal, builtin_pow, builtin_sqrt},
+        math::{builtin_not_equal, builtin_pow, builtin_sqrt, builtin_summate},
     },
     config::Config,
     environment::{Environment, Scope},
@@ -43,6 +43,7 @@ pub struct RuntimeMispFunction {
 pub enum Function {
     Native(NativeMispFunction),
     Runtime(RuntimeMispFunction),
+    Lambda(Lambda),
 }
 
 #[derive(Debug, Clone)]
@@ -50,7 +51,6 @@ pub enum Value {
     Atom(String),
     List(Vec<Value>),
     Decimal(Decimal),
-    Lambda(Lambda),
     Function(Function),
 }
 
@@ -117,6 +117,7 @@ impl Default for Executor {
         env.define_native_function(">=", builtin_gte);
         env.define_native_function("pow", builtin_pow);
         env.define_native_function("sqrt", builtin_sqrt);
+        env.define_native_function("summate", builtin_summate);
 
         // Trig Functions
         // env.define_native_function("sin", builtin_sin);
@@ -131,6 +132,64 @@ impl Default for Executor {
 }
 
 impl Executor {
+    fn run_func(&mut self, func: &Function, args: &[Value]) -> Result<Value, Error> {
+        match func {
+            Function::Native(f) => f(self, args),
+            Function::Runtime(f) => {
+                if args.len() != f.params.len() {
+                    return Err(Error::FunctionArity {
+                        name: "<function>".to_string(),
+                        expected: f.params.len(),
+                        actual: args.len(),
+                    });
+                }
+
+                let values = args
+                    .iter()
+                    .map(|a| self.eval(a))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                self.env.push_scope();
+
+                for (param, value) in f.params.iter().zip(values.iter()) {
+                    self.env.set(param, value.clone());
+                }
+
+                let result = self.eval(&f.body);
+
+                self.env.pop_scope();
+
+                result
+            }
+            Function::Lambda(l) => {
+                if args.len() != l.params.len() {
+                    return Err(Error::FunctionArity {
+                        name: "<lambda>".to_string(),
+                        expected: l.params.len(),
+                        actual: args.len(),
+                    });
+                }
+
+                let values = args
+                    .iter()
+                    .map(|a| self.eval(a))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                self.env.push_given_scope(l.scope.clone());
+
+                for (param, value) in l.params.iter().zip(values.iter()) {
+                    self.env.set(param, value.clone());
+                }
+
+                let result = self.eval(&l.body);
+
+                self.env.pop_scope();
+
+                result
+            }
+        }
+    }
+
     fn eval(&mut self, value: &Value) -> Result<Value, Error> {
         match value {
             Value::Atom(name) => self
@@ -148,65 +207,11 @@ impl Executor {
                 let args = &exprs[1..];
 
                 match caller {
-                    Value::Function(func) => match func {
-                        Function::Native(f) => f(self, args),
-                        Function::Runtime(f) => {
-                            if args.len() != f.params.len() {
-                                return Err(Error::FunctionArity {
-                                    name: Self::print(caller),
-                                    expected: f.params.len(),
-                                    actual: args.len(),
-                                });
-                            }
-
-                            let values = args
-                                .iter()
-                                .map(|a| self.eval(a))
-                                .collect::<Result<Vec<_>, _>>()?;
-
-                            self.env.push_scope();
-
-                            for (param, value) in f.params.iter().zip(values.iter()) {
-                                self.env.set(param, value.clone());
-                            }
-
-                            let result = self.eval(&f.body);
-
-                            self.env.pop_scope();
-
-                            result
-                        }
-                    },
-                    Value::Lambda(lambda) => {
-                        if args.len() != lambda.params.len() {
-                            return Err(Error::FunctionArity {
-                                name: Self::print(caller),
-                                expected: lambda.params.len(),
-                                actual: args.len(),
-                            });
-                        }
-
-                        let values = args
-                            .iter()
-                            .map(|a| self.eval(a))
-                            .collect::<Result<Vec<_>, _>>()?;
-
-                        self.env.push_given_scope(lambda.scope.clone());
-
-                        for (param, value) in lambda.params.iter().zip(values.iter()) {
-                            self.env.set(param, value.clone());
-                        }
-
-                        let result = self.eval(&lambda.body);
-
-                        self.env.pop_scope();
-
-                        result
-                    }
+                    Value::Function(func) => self.run_func(func, args),
                     _ => Err(Error::FunctionNotFound),
                 }
             }
-            Value::Decimal(_) | Value::Lambda(_) | Value::Function(_) => Ok(value.clone()),
+            Value::Decimal(_) | Value::Function(_) => Ok(value.clone()),
         }
     }
 
@@ -230,14 +235,12 @@ impl Executor {
             //         .to_scientific_notation(),
             // },
             Value::Decimal(d) => format!("{d}"),
-            Value::Lambda(lambda) => format!("lambda ({})", lambda.params.join(", ")),
-            Value::Function(func) => format!(
-                "func ({})",
-                match func {
-                    Function::Native(_) => "native".to_string(),
-                    Function::Runtime(rt) => rt.params.join(", "),
-                }
-            ),
+            // Value::Decimal(d) => format!("{d:?}"),
+            Value::Function(func) => match func {
+                Function::Native(_) => "<native>".to_string(),
+                Function::Runtime(rt) => format!("<function> -> ({})", rt.params.join(", ")),
+                Function::Lambda(l) => format!("<lambda> -> ({})", l.params.join(", ")),
+            },
         }
     }
 }

@@ -154,3 +154,47 @@ pub fn builtin_pow(executor: &mut Executor, args: &[Value]) -> Result<Value, Err
         _ => todo!("Unsupported type for pow"),
     }
 }
+
+pub fn builtin_summate(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
+    if args.len() != 3 {
+        return Err(Error::FunctionArity {
+            name: "summate".to_string(),
+            expected: 3,
+            actual: args.len(),
+        });
+    }
+
+    let Value::Decimal(start) = executor.eval(&args[0])? else {
+        return Err(Error::FunctionCall);
+    };
+
+    let Value::Decimal(end) = executor.eval(&args[1])? else {
+        return Err(Error::FunctionCall);
+    };
+
+    let mut start = start.to_u128() as u64;
+    let end = end.to_u128() as u64;
+
+    let ret = match executor.eval(&args[2])? {
+        Value::Function(function) => {
+            let mut sum = Decimal::ZERO;
+
+            while start <= end {
+                let current = Decimal::from_unsigned(start);
+
+                let incr = match executor.run_func(&function, &[Value::Decimal(current)])? {
+                    Value::Decimal(decimal) => decimal,
+                    _ => return Err(Error::FunctionCall),
+                };
+
+                sum += incr;
+                start += 1
+            }
+
+            sum
+        }
+        _ => return Err(Error::FunctionCall),
+    };
+
+    Ok(Value::Decimal(ret))
+}

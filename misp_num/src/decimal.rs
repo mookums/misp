@@ -93,7 +93,7 @@ impl Decimal {
         self
     }
 
-    fn rescale_with_precision_loss(self, target_scale: i32) -> Decimal {
+    fn rescale_with_precision_loss(self, target_scale: i32) -> Option<Decimal> {
         let mut working_scale = self.scale;
         let mut working_value = self.value;
 
@@ -104,33 +104,33 @@ impl Decimal {
                         working_value = new_value;
                         working_scale += 1;
                     } else {
-                        break;
+                        return None;
                     }
                 }
             }
-            std::cmp::Ordering::Equal => todo!(),
+            std::cmp::Ordering::Equal => return Some(self),
             std::cmp::Ordering::Greater => {
                 while working_scale > target_scale {
                     if let Some(new_value) = working_value.checked_div(10) {
                         working_value = new_value;
                         working_scale -= 1;
                     } else {
-                        break;
+                        return None;
                     }
                 }
             }
         }
 
-        Decimal {
+        Some(Decimal {
             value: working_value,
             scale: working_scale,
             sign: self.sign,
-        }
+        })
     }
 
-    pub fn rescale(self, scale: i32) -> Decimal {
+    pub fn rescale(self, scale: i32) -> Option<Decimal> {
         if self.scale == scale {
-            return self;
+            return Some(self);
         }
 
         let rescaled = match self.scale.cmp(&scale) {
@@ -138,7 +138,7 @@ impl Decimal {
                 // we need to scale up by the diff.
                 let diff = scale - self.scale;
 
-                if let Some(multiplier) = 10u64.checked_pow(diff.unsigned_abs())
+                if let Some(multiplier) = 10u64.checked_pow(diff as u32)
                     && let Some(result) = self.value.checked_mul(multiplier)
                 {
                     result
@@ -150,7 +150,7 @@ impl Decimal {
             std::cmp::Ordering::Greater => {
                 let diff = self.scale - scale;
 
-                if let Some(multiplier) = 10u64.checked_pow(diff.unsigned_abs())
+                if let Some(multiplier) = 10u64.checked_pow(diff as u32)
                     && let Some(result) = self.value.checked_div(multiplier)
                 {
                     result
@@ -160,32 +160,39 @@ impl Decimal {
             }
         };
 
-        Decimal {
+        Some(Decimal {
             value: rescaled,
             scale,
             sign: self.sign,
-        }
+        })
     }
 
     fn align_scales(a: Decimal, b: Decimal) -> (Decimal, Decimal) {
         let (a_normal, b_normal) = (a.normalize(), b.normalize());
 
         let target_scale = a_normal.scale.max(b_normal.scale);
+        if let (Some(rescaled_a), Some(rescaled_b)) =
+            (a.rescale(target_scale), b.rescale(target_scale))
+        {
+            (rescaled_a, rescaled_b)
+        } else {
+            let mut test_scale = target_scale;
+            while test_scale >= a_normal.scale.min(b_normal.scale) {
+                if let (Some(a_scaled), Some(b_scaled)) =
+                    (a.rescale(test_scale), b.rescale(test_scale))
+                {
+                    return (a_scaled, b_scaled);
+                }
+                test_scale -= 1;
+            }
 
-        (a.rescale(target_scale), b.rescale(target_scale))
-
-        // if let Some(ar) = a.rescale(b.scale) {
-        //     (ar, b)
-        // } else if let Some(br) = b.rescale(a.scale) {
-        //     (a, br)
-        // } else {
-        //     panic!("No uniform scaling");
-        // }
+            panic!("Can't align at all");
+        }
     }
 
     pub fn pow(self, power: impl Into<Decimal>) -> Decimal {
         let power: Decimal = power.into();
-        if power.scale != 0 || power.sign == Sign::Negative {
+        if !power.is_integer() || power.sign == Sign::Negative {
             panic!("Only non-negative integer exponents supported");
         }
 
@@ -200,21 +207,27 @@ impl Decimal {
         current.normalize()
     }
 
-    fn is_integer(self) -> bool {
+    pub fn is_integer(self) -> bool {
         self.scale == 0 || self.value % 10_u64.pow(self.scale as u32) == 0
+    }
+
+    pub fn to_u128(self) -> u128 {
+        assert!(self.is_integer());
+        (self.value as u128) * 10_u128.pow(self.scale as u32)
     }
 
     fn perfect_square(self) -> Option<Decimal> {
         // Using binary search to find a potential perfect square.
         // O(log n)
+
         if !self.is_integer() {
             return None;
         }
 
-        let int_value: i128 = if self.scale <= 0 {
-            (self.value as i128) * 10_i128.pow(self.scale.unsigned_abs())
+        let int_value: u128 = if self.scale <= 0 {
+            (self.value as u128) * 10_u128.pow(self.scale.unsigned_abs())
         } else {
-            (self.value as i128) / 10_i128.pow(self.scale.unsigned_abs())
+            (self.value as u128) / 10_u128.pow(self.scale.unsigned_abs())
         };
 
         let mut low = 0;
@@ -234,41 +247,6 @@ impl Decimal {
         None
     }
 
-    // fn perfect_square(self) -> Option<Decimal> {
-    //     if !self.is_integer() || self.sign == Sign::Negative {
-    //         return None;
-    //     };
-
-    //     let int_value: i128 = if self.scale <= 0 {
-    //         (self.value as i128) * 10_i128.pow(self.scale.unsigned_abs())
-    //     } else {
-    //         (self.value as i128) / 10_i128.pow(self.scale.unsigned_abs())
-    //     };
-
-    //     if int_value == 0 {
-    //         return Some(Decimal::ZERO);
-    //     } else if int_value == 1 {
-    //         return Some(Decimal::ONE);
-    //     }
-
-    //     let mut x = int_value;
-    //     loop {
-    //         let next_x = (x + int_value / x) / 2;
-    //         if next_x >= x {
-    //             // Converged or started oscillating
-    //             break;
-    //         }
-    //         x = next_x;
-    //     }
-
-    //     // Check if it's actually a perfect square
-    //     if x * x == int_value {
-    //         Some(Decimal::from_unsigned(x as u64))
-    //     } else {
-    //         None
-    //     }
-    // }
-
     pub fn sqrt(self) -> Decimal {
         // Using Newton-Raphson estimation.
         // f(x) -> x^2 - k
@@ -286,16 +264,8 @@ impl Decimal {
 
         // If we are larger than roughly sqrt 2, better to 1/2 it.
         // Otherwise, self is a fine guess...
+        let mut current = Decimal::ONE;
 
-        let int_value: i128 = if self.scale <= 0 {
-            (self.value as i128) * 10_i128.pow(self.scale.unsigned_abs())
-        } else {
-            (self.value as i128) / 10_i128.pow(self.scale.unsigned_abs())
-        };
-
-        let mut current = Decimal::from_unsigned(int_value.isqrt() as u64);
-
-        // TODO: Probably make this configurable...?
         for _ in 0..10 {
             let curr_squared = current.pow(2);
             let numerator = curr_squared - self;
@@ -440,7 +410,8 @@ impl Display for Decimal {
             }
             std::cmp::Ordering::Equal => write!(f, "{}{num_str}", self.sign),
             std::cmp::Ordering::Greater => {
-                let (pre, post) = num_str.split_at(num_str.len() - self.scale as usize);
+                let (pre, post) =
+                    num_str.split_at(num_str.len().saturating_sub(self.scale as usize));
                 write!(f, "{}{pre}.{post}", self.sign)
             }
         }
@@ -484,19 +455,19 @@ impl Add for Decimal {
             }
         }
 
-        // eprintln!("Before Align: a={self:?}, b={rhs:?}");
+        // eprintln!("Before Align: ({self:?}, {rhs:?})");
         let (first, second) = Decimal::align_scales(self, rhs);
-        // eprintln!("After Align: a={first:?}, b={second:?}");
+        // eprintln!("After Align: ({first:?}, {second:?})");
 
         let sum = match (first.sign, second.sign) {
             (Sign::Positive, Sign::Positive) => {
                 add_values(first.value, second.value, first.scale, Sign::Positive)
             }
-            (Sign::Positive, Sign::Negative) => sub_values(first.value, second.value, first.scale),
-            (Sign::Negative, Sign::Positive) => sub_values(second.value, first.value, first.scale),
             (Sign::Negative, Sign::Negative) => {
                 add_values(first.value, second.value, first.scale, Sign::Negative)
             }
+            (Sign::Positive, Sign::Negative) => sub_values(first.value, second.value, first.scale),
+            (Sign::Negative, Sign::Positive) => sub_values(second.value, first.value, first.scale),
         };
 
         sum.normalize()
@@ -522,26 +493,48 @@ impl Mul for Decimal {
     type Output = Decimal;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        let target_scale = self.scale + rhs.scale;
         let sign = match (self.sign, rhs.sign) {
             (Sign::Positive, Sign::Positive) => Sign::Positive,
             (Sign::Positive, Sign::Negative) | (Sign::Negative, Sign::Positive) => Sign::Negative,
             (Sign::Negative, Sign::Negative) => Sign::Positive,
         };
 
-        let mul_128 = (self.value as u128) * (rhs.value as u128);
+        let (mut first, mut second) = (self, rhs);
 
-        if mul_128 <= u64::MAX as u128 {
+        // This gets our target scale, properly scaling down our elements as well.
+        // This process is slightly lossy...
+        //
+        //
+        // TODO: This needs to work even if your scale is negative...
+        let target_scale = match first.scale.checked_add(second.scale) {
+            Some(s) => s,
+            None => match first.scale.cmp(&second.scale) {
+                std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {
+                    let new_scale = second.scale - (i32::MAX - first.scale);
+                    second = second.rescale_with_precision_loss(new_scale).unwrap();
+                    first.scale + new_scale
+                }
+                std::cmp::Ordering::Greater => {
+                    let new_scale = first.scale - (i32::MAX - second.scale);
+                    first = first.rescale_with_precision_loss(new_scale).unwrap();
+                    new_scale + second.scale
+                }
+            },
+        };
+
+        let product = (first.value as u128) * (second.value as u128);
+
+        if product <= u64::MAX as u128 {
             Decimal {
-                value: mul_128 as u64,
+                value: product as u64,
                 scale: target_scale,
                 sign,
             }
             .normalize()
         } else {
-            let mut result = mul_128;
+            let mut result = product;
             let mut scale_reduction = 0;
-            while result > u64::MAX as u128 {
+            while result > (u64::MAX as u128) {
                 result /= 10;
                 scale_reduction += 1;
             }
@@ -573,7 +566,44 @@ impl Div for Decimal {
             (Sign::Positive, Sign::Negative) | (Sign::Negative, Sign::Positive) => Sign::Negative,
         };
 
-        todo!()
+        let target_scale = self.scale - rhs.scale;
+        let dividend = self.value;
+
+        // Perfect divison
+        if dividend % rhs.value == 0 {
+            return Decimal {
+                value: dividend / rhs.value,
+                scale: target_scale,
+                sign,
+            }
+            .normalize();
+        }
+
+        let mut result: u64 = dividend / rhs.value;
+
+        let divisor = rhs.value as u128;
+        let mut remainder: u128 = dividend as u128 % divisor;
+        let mut additional_scale = 0;
+
+        while remainder > 0 {
+            // We are out of precision.
+            if result > (u64::MAX / 10) {
+                break;
+            }
+
+            remainder *= 10;
+            let next_digit = remainder / divisor;
+            remainder %= divisor;
+            result = result * 10 + (next_digit as u64);
+            additional_scale += 1;
+        }
+
+        Decimal {
+            value: result,
+            scale: target_scale + additional_scale,
+            sign,
+        }
+        .normalize()
     }
 }
 
@@ -920,7 +950,7 @@ mod tests {
     fn test_rescale() {
         let first = Decimal::new(500, 2, Sign::Positive);
         assert_eq!(
-            first.rescale(1),
+            first.rescale(1).unwrap(),
             Decimal {
                 value: 50,
                 scale: 1,
@@ -928,7 +958,7 @@ mod tests {
             }
         );
         assert_eq!(
-            first.rescale(0),
+            first.rescale(0).unwrap(),
             Decimal {
                 value: 5,
                 scale: 0,
@@ -1302,5 +1332,19 @@ mod tests {
         assert_eq!(res, Decimal::new(225, 2, Sign::Positive));
         res -= 2.into();
         assert_eq!(res, Decimal::new(25, 2, Sign::Positive));
+    }
+
+    #[test]
+    fn test_sqrt_precision() {
+        // Generally, we lose precision during certain ops but it should be within 8 digits.
+        assert_eq!(
+            Decimal::PI.pow(2).sqrt().rescale(15).unwrap(),
+            Decimal::PI.rescale(15).unwrap()
+        );
+
+        assert_eq!(
+            Decimal::E.pow(2).sqrt().rescale(15).unwrap(),
+            Decimal::E.rescale(15).unwrap()
+        );
     }
 }
