@@ -25,7 +25,7 @@ impl Misp {
         let tokens = self.lexer.lex(input)?;
         self.parser.insert_tokens(tokens);
         let sexpr = self.parser.parse()?;
-        Ok(self.executor.execute(&sexpr)?)
+        Ok(self.executor.execute(sexpr.into())?)
     }
 
     pub fn eval_script(&mut self, input: impl AsRef<str>) -> Result<Vec<Value>, Error> {
@@ -34,8 +34,8 @@ impl Misp {
         self.parser.insert_tokens(tokens);
         let sexprs = self.parser.parse_multiple()?;
         Ok(sexprs
-            .iter()
-            .map(|s| self.executor.execute(s))
+            .into_iter()
+            .map(|s| self.executor.execute(s.into()))
             .collect::<Result<Vec<Value>, misp_executor::Error>>()?)
     }
 
