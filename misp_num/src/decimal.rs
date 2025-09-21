@@ -168,26 +168,16 @@ impl Decimal {
     }
 
     fn align_scales(a: Decimal, b: Decimal) -> (Decimal, Decimal) {
-        let (a_normal, b_normal) = (a.normalize(), b.normalize());
+        let target_scale = a.scale.max(b.scale);
+        let target_min = a.scale.min(b.scale);
 
-        let target_scale = a_normal.scale.max(b_normal.scale);
-        if let (Some(rescaled_a), Some(rescaled_b)) =
-            (a.rescale(target_scale), b.rescale(target_scale))
-        {
-            (rescaled_a, rescaled_b)
-        } else {
-            let mut test_scale = target_scale;
-            while test_scale >= a_normal.scale.min(b_normal.scale) {
-                if let (Some(a_scaled), Some(b_scaled)) =
-                    (a.rescale(test_scale), b.rescale(test_scale))
-                {
-                    return (a_scaled, b_scaled);
-                }
-                test_scale -= 1;
+        for scale in (target_min..=target_scale).rev() {
+            if let (Some(a_scaled), Some(b_scaled)) = (a.rescale(scale), b.rescale(scale)) {
+                return (a_scaled, b_scaled);
             }
-
-            panic!("Can't align at all");
         }
+
+        panic!("Can't align at all");
     }
 
     pub fn pow(self, power: impl Into<Decimal>) -> Decimal {

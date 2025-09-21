@@ -7,7 +7,7 @@ pub struct Scope {
     pub bindings: HashMap<String, Value>,
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Environment {
     scopes: Vec<Scope>,
 }

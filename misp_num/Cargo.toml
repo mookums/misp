@@ -3,4 +3,9 @@ name = "misp_num"
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "decimal"
+harness = false

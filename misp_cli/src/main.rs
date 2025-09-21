@@ -1,8 +1,6 @@
 use std::time::{Duration, Instant};
 
-use misp_executor::Executor;
-use misp_lexer::Lexer;
-use misp_parser::Parser;
+use misp_interp::Misp;
 use ratatui::{
     Frame, Terminal,
     crossterm::{
@@ -20,7 +18,7 @@ struct App {
     input: String,
     cursor: usize,
     history: Vec<String>,
-    executor: Executor,
+    misp: Misp,
 }
 
 impl App {
@@ -73,37 +71,9 @@ impl App {
 
         self.history.push(format!("misp >> {}", line));
 
-        let lexer = Lexer::default();
-        let tokens = match lexer.lex(&line) {
-            Ok(tokens) => tokens,
-            Err(_) => {
-                self.history.push("error: failed to lex".to_string());
-                self.input.clear();
-                self.cursor = 0;
-                return;
-            }
-        };
-
-        // self.history.push(format!("Lexed: {tokens:?}\n"));
-
-        let mut parser = Parser::new(tokens);
-        let sexprs = match parser.parse() {
-            Ok(sexprs) => sexprs,
-            Err(_) => {
-                self.history.push("error: failed to parse".to_string());
-                self.input.clear();
-                self.cursor = 0;
-                return;
-            }
-        };
-
-        // self.history.push(format!("Parsed: {sexprs:?}\n"));
-
-        for sexpr in sexprs {
-            match self.executor.execute(&sexpr) {
-                Ok(value) => self.history.push(Executor::print(&value)),
-                Err(err) => self.history.push(format!("{}", err)),
-            }
+        match self.misp.eval(&line) {
+            Ok(value) => self.history.push(Misp::print(&value)),
+            Err(err) => self.history.push(format!("{}", err)),
         }
 
         self.input.clear();

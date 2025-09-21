@@ -20,7 +20,7 @@ pub enum Error {
     },
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Lexer {
     line: usize,
     column: usize,
@@ -127,7 +127,14 @@ impl Lexer {
         self.ident_token(rest)
     }
 
-    pub fn lex(mut self, input: &str) -> Result<Vec<Token>, Error> {
+    fn reset(&mut self) {
+        self.line = 0;
+        self.column = 0;
+    }
+
+    pub fn lex(&mut self, input: &str) -> Result<Vec<Token>, Error> {
+        self.reset();
+
         let mut tokens = Vec::new();
 
         for line in input.lines() {
@@ -167,7 +174,7 @@ mod tests {
 
     #[test]
     fn test_basic_addition() {
-        let lexer = Lexer::default();
+        let mut lexer = Lexer::default();
         let input = "(+ 10 4)";
         let tokens = lexer.lex(input).unwrap();
 
@@ -181,7 +188,7 @@ mod tests {
 
     #[test]
     fn test_compound_math() {
-        let lexer = Lexer::default();
+        let mut lexer = Lexer::default();
         let input = "(+ (* 10 15) 4)";
         let tokens = lexer.lex(input).unwrap();
 

@@ -26,9 +26,9 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct Lambda {
-    params: Vec<String>,
-    body: Box<Value>,
-    scope: Scope,
+    pub params: Vec<String>,
+    pub body: Box<Value>,
+    pub scope: Scope,
 }
 
 type NativeMispFunction = fn(&mut Executor, &[Value]) -> Result<Value, Error>;
@@ -80,9 +80,10 @@ pub enum Error {
     FunctionNotFound,
 }
 
+#[derive(Debug, Clone)]
 pub struct Executor {
-    config: Config,
-    env: Environment,
+    pub config: Config,
+    pub env: Environment,
 }
 
 impl Default for Executor {
@@ -132,6 +133,37 @@ impl Default for Executor {
 }
 
 impl Executor {
+    fn eval(&mut self, value: &Value) -> Result<Value, Error> {
+        match value {
+            Value::Atom(name) => self
+                .env
+                .get(name)
+                .cloned()
+                .ok_or_else(|| Error::UnknownSymbol(name.clone())),
+
+            Value::List(exprs) => {
+                if exprs.is_empty() {
+                    return Err(Error::FunctionCall);
+                }
+
+                let caller = &self.eval(&exprs[0])?;
+                let args = &exprs[1..];
+
+                match caller {
+                    Value::Function(func) => self.run_func(func, args),
+                    _ => Err(Error::FunctionNotFound),
+                }
+            }
+            Value::Decimal(_) | Value::Function(_) => Ok(value.clone()),
+        }
+    }
+
+    pub fn execute(&mut self, expr: &SExpr) -> Result<Value, Error> {
+        let prev = self.eval(&expr.clone().into())?;
+        self.env.set_prev(prev.clone());
+        Ok(prev)
+    }
+
     fn run_func(&mut self, func: &Function, args: &[Value]) -> Result<Value, Error> {
         match func {
             Function::Native(f) => f(self, args),
@@ -187,60 +219,6 @@ impl Executor {
 
                 result
             }
-        }
-    }
-
-    fn eval(&mut self, value: &Value) -> Result<Value, Error> {
-        match value {
-            Value::Atom(name) => self
-                .env
-                .get(name)
-                .cloned()
-                .ok_or_else(|| Error::UnknownSymbol(name.clone())),
-
-            Value::List(exprs) => {
-                if exprs.is_empty() {
-                    return Err(Error::FunctionCall);
-                }
-
-                let caller = &self.eval(&exprs[0])?;
-                let args = &exprs[1..];
-
-                match caller {
-                    Value::Function(func) => self.run_func(func, args),
-                    _ => Err(Error::FunctionNotFound),
-                }
-            }
-            Value::Decimal(_) | Value::Function(_) => Ok(value.clone()),
-        }
-    }
-
-    pub fn execute(&mut self, expr: &SExpr) -> Result<Value, Error> {
-        let prev = self.eval(&expr.clone().into())?;
-        self.env.set_prev(prev.clone());
-        Ok(prev)
-    }
-
-    pub fn print(value: &Value) -> String {
-        match value {
-            Value::Atom(s) => s.to_string(),
-            Value::List(exprs) => {
-                let items: Vec<String> = exprs.iter().map(Self::print).collect();
-                format!("({})", items.join(" "))
-            }
-            // Value::Decimal(d) => match self.config.decimal_format {
-            //     DecimalFormat::Standard => d.with_prec(self.config.decimal_precision).to_string(),
-            //     DecimalFormat::Scientific => d
-            //         .with_prec(self.config.decimal_precision)
-            //         .to_scientific_notation(),
-            // },
-            Value::Decimal(d) => format!("{d}"),
-            // Value::Decimal(d) => format!("{d:?}"),
-            Value::Function(func) => match func {
-                Function::Native(_) => "<native>".to_string(),
-                Function::Runtime(rt) => format!("<function> -> ({})", rt.params.join(", ")),
-                Function::Lambda(l) => format!("<lambda> -> ({})", l.params.join(", ")),
-            },
         }
     }
 }

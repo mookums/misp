@@ -17,6 +17,7 @@ pub enum SExpr {
     Decimal(Decimal),
 }
 
+#[derive(Debug, Clone, Default)]
 pub struct Parser {
     tokens: VecDeque<Token>,
 }
@@ -28,7 +29,15 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Vec<SExpr>, Error> {
+    pub fn insert_tokens(&mut self, tokens: Vec<Token>) {
+        self.tokens = tokens.into();
+    }
+
+    pub fn parse(&mut self) -> Result<SExpr, Error> {
+        self.parse_expr()
+    }
+
+    pub fn parse_multiple(&mut self) -> Result<Vec<SExpr>, Error> {
         let mut exprs = Vec::new();
 
         while !self.is_at_end() {
