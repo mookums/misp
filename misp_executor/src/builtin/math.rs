@@ -24,33 +24,9 @@ macro_rules! binary_op {
             let right = executor.evaluate(&args[1])?;
 
             match (left, right) {
-                (Value::Decimal(a), Value::Decimal(b)) => Ok(Value::Decimal(a $op b)),
+                (Value::Decimal(a), Value::Decimal(b)) => Ok(Value::Decimal(Decimal::from(a $op b))),
                 _ => Err(Error::FunctionCall),
             }
-        }
-    };
-}
-
-macro_rules! binary_comparison_op {
-    ($name:ident, $op_name:literal, $op:tt) => {
-        pub fn $name(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
-            if args.len() != 2 {
-                return Err(Error::FunctionArity {
-                    name: $op_name.to_string(),
-                    expected: 2,
-                    actual: args.len(),
-                });
-            }
-
-            let left = executor.evaluate(&args[0])?;
-            let right = executor.evaluate(&args[1])?;
-
-            let result = match (left, right) {
-                (Value::Decimal(a), Value::Decimal(b)) => a $op b,
-                _ => return Err(Error::FunctionCall),
-            };
-
-            Ok(Value::Decimal(Decimal::from(result)))
         }
     };
 }
@@ -59,13 +35,12 @@ binary_op!(builtin_add, "+", +);
 binary_op!(builtin_minus, "-", -);
 binary_op!(builtin_multiply, "*", *);
 binary_op!(builtin_divide, "/", /);
-
-binary_comparison_op!(builtin_equal, "==", ==);
-binary_comparison_op!(builtin_not_equal, "!=", !=);
-binary_comparison_op!(builtin_lt, "<", <);
-binary_comparison_op!(builtin_lte, "<=", <=);
-binary_comparison_op!(builtin_gt, ">", >);
-binary_comparison_op!(builtin_gte, ">=", >=);
+binary_op!(builtin_equal, "==", ==);
+binary_op!(builtin_not_equal, "!=", !=);
+binary_op!(builtin_lt, "<", <);
+binary_op!(builtin_lte, "<=", <=);
+binary_op!(builtin_gt, ">", >);
+binary_op!(builtin_gte, ">=", >=);
 
 // pub fn builtin_mod(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
 //     if args.len() != 2 {

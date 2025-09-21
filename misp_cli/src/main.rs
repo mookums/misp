@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use clap::{Parser, Subcommand};
 use misp_interp::Misp;
 use ratatui::{
     Frame, Terminal,
@@ -12,6 +13,19 @@ use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph},
 };
+
+#[derive(Parser)]
+#[command(version)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Repl,
+    Eval { expression: String },
+}
 
 #[derive(Default)]
 struct App {
@@ -143,16 +157,37 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App, tick_rate: Dura
 }
 
 fn main() {
-    enable_raw_mode().unwrap();
-    let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen).unwrap();
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend).unwrap();
+    let cli = Cli::parse();
 
-    let app = App::default();
-    run_app(&mut terminal, app, Duration::from_millis(100));
+    match cli.command {
+        Commands::Repl => {
+            enable_raw_mode().unwrap();
+            let mut stdout = std::io::stdout();
+            execute!(stdout, EnterAlternateScreen).unwrap();
+            let backend = CrosstermBackend::new(stdout);
+            let mut terminal = Terminal::new(backend).unwrap();
 
-    disable_raw_mode().unwrap();
-    execute!(terminal.backend_mut(), LeaveAlternateScreen).unwrap();
-    terminal.show_cursor().unwrap();
+            let app = App::default();
+            run_app(&mut terminal, app, Duration::from_millis(100));
+
+            disable_raw_mode().unwrap();
+            execute!(terminal.backend_mut(), LeaveAlternateScreen).unwrap();
+            terminal.show_cursor().unwrap();
+        }
+        Commands::Eval { expression } => {
+            let mut misp = Misp::default();
+
+            match misp.eval_script(&expression) {
+                Ok(value) => println!(
+                    "{}",
+                    value
+                        .iter()
+                        .map(Misp::print)
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                ),
+                Err(err) => eprintln!("Error: {}", err),
+            }
+        }
+    }
 }

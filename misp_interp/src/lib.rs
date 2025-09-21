@@ -28,6 +28,17 @@ impl Misp {
         Ok(self.executor.execute(&sexpr)?)
     }
 
+    pub fn eval_script(&mut self, input: impl AsRef<str>) -> Result<Vec<Value>, Error> {
+        let input: &str = input.as_ref();
+        let tokens = self.lexer.lex(input)?;
+        self.parser.insert_tokens(tokens);
+        let sexprs = self.parser.parse_multiple()?;
+        Ok(sexprs
+            .iter()
+            .map(|s| self.executor.execute(s))
+            .collect::<Result<Vec<Value>, misp_executor::Error>>()?)
+    }
+
     pub fn eval_to_string(&mut self, input: impl AsRef<str>) -> Result<String, Error> {
         let value = self.eval(input)?;
         Ok(Self::print(&value))
