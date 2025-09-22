@@ -267,6 +267,7 @@ impl Executor {
         // eprintln!("Current Instruction: {instruction:?}");
         // eprintln!("Instructions: {:?}", self.instructions);
         // eprintln!("Stack: {:?}", self.stack);
+        // eprintln!("Frames: {:?}", self.frames);
         // eprintln!();
         // std::thread::sleep(std::time::Duration::from_secs(1));
 
