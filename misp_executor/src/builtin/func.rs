@@ -1,14 +1,18 @@
 use crate::{Error, Executor, Function, Injector, Instruction, Lambda, RuntimeMispFunction, Value};
 
 pub fn builtin_func(executor: &mut Executor) -> Result<(), Error> {
+    let (body, params_thunk, name) = (
+        executor.stack.pop().ok_or(Error::EmptyStack)?,
+        executor.stack.pop().ok_or(Error::EmptyStack)?,
+        executor.stack.pop().ok_or(Error::EmptyStack)?,
+    );
+
     let mut injector = Injector {
         instructions: &mut executor.instructions,
         index: 0,
     };
 
-    let body = executor.stack.pop().unwrap();
-
-    let params = match executor.stack.pop().unwrap() {
+    let params = match params_thunk {
         Value::List(param_list) => {
             let mut params = Vec::new();
             for param in param_list {
@@ -22,8 +26,8 @@ pub fn builtin_func(executor: &mut Executor) -> Result<(), Error> {
         _ => return Err(Error::FunctionCall),
     };
 
-    let Value::Atom(name) = executor.stack.pop().unwrap() else {
-        return Err(Error::FunctionCall);
+    let Value::Atom(name) = name else {
+        return Err(Error::InvalidType);
     };
 
     let function = Value::Function(Function::Runtime(RuntimeMispFunction {
@@ -39,14 +43,12 @@ pub fn builtin_func(executor: &mut Executor) -> Result<(), Error> {
 }
 
 pub fn builtin_lambda(executor: &mut Executor) -> Result<(), Error> {
-    let mut injector = Injector {
-        instructions: &mut executor.instructions,
-        index: 0,
-    };
+    let (body, params_thunk) = (
+        executor.stack.pop().ok_or(Error::EmptyStack)?,
+        executor.stack.pop().ok_or(Error::EmptyStack)?,
+    );
 
-    let body = executor.stack.pop().unwrap();
-
-    let params = match executor.stack.pop().unwrap() {
+    let params = match params_thunk {
         Value::List(param_list) => {
             let mut params = Vec::new();
             for param in param_list {
@@ -65,6 +67,11 @@ pub fn builtin_lambda(executor: &mut Executor) -> Result<(), Error> {
         body: Box::new(body),
         scope: executor.env.current_scope().clone(),
     }));
+
+    let mut injector = Injector {
+        instructions: &mut executor.instructions,
+        index: 0,
+    };
 
     injector.inject(Instruction::Push(lambda));
     Ok(())

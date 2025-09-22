@@ -6,9 +6,16 @@ pub fn builtin_if(executor: &mut Executor) -> Result<(), Error> {
         index: 0,
     };
 
-    injector.inject(Instruction::Push(executor.stack.pop().unwrap()));
-    injector.inject(Instruction::Push(executor.stack.pop().unwrap()));
-    Executor::inject_compiled(executor.stack.pop().unwrap(), &mut injector)?;
+    injector.inject(Instruction::Push(
+        executor.stack.pop().ok_or(Error::EmptyStack)?,
+    ));
+    injector.inject(Instruction::Push(
+        executor.stack.pop().ok_or(Error::EmptyStack)?,
+    ));
+    Executor::inject_compiled(
+        executor.stack.pop().ok_or(Error::EmptyStack)?,
+        &mut injector,
+    )?;
     injector.inject(Instruction::If);
 
     Ok(())

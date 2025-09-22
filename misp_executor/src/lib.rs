@@ -2,7 +2,7 @@ mod builtin;
 pub mod config;
 pub mod environment;
 
-use std::{collections::VecDeque, thread::sleep, time::Duration};
+use std::collections::VecDeque;
 
 use misp_num::decimal::Decimal;
 use misp_parser::SExpr;
@@ -87,11 +87,11 @@ pub enum Instruction {
 }
 
 macro_rules! binary_op {
-    ($s: ident, $op:tt) => {{
+    ($s: ident, $op :tt) => {{
         let (Value::Decimal(first), Value::Decimal(second)) =
-            ($s.stack.pop().unwrap(), $s.stack.pop().unwrap())
+            ($s.stack.pop().ok_or(Error::EmptyStack)?, $s.stack.pop().ok_or(Error::EmptyStack)?)
         else {
-            panic!()
+            return Err(Error::InvalidType)
         };
 
         $s.stack.push(Value::Decimal(Decimal::from(first $op second)));
@@ -112,8 +112,10 @@ pub enum Error {
     },
     #[error("Function not found")]
     FunctionNotFound,
-    #[error("Recursion limit reached")]
-    Recursion,
+    #[error("Invalid type")]
+    InvalidType,
+    #[error("Empty Stack")]
+    EmptyStack,
 }
 
 pub struct Injector<'a> {
@@ -129,11 +131,18 @@ impl<'a> Injector<'a> {
 }
 
 #[derive(Debug, Clone)]
+pub struct CallFrame {
+    instructions: VecDeque<Instruction>,
+    stack_len: usize,
+}
+
+#[derive(Debug, Clone)]
 pub struct Executor {
     pub config: Config,
     pub env: Environment,
     pub instructions: VecDeque<Instruction>,
     pub stack: Vec<Value>,
+    pub frames: Vec<CallFrame>,
 }
 
 impl Default for Executor {
@@ -183,6 +192,7 @@ impl Default for Executor {
             env,
             instructions: VecDeque::new(),
             stack: Vec::new(),
+            frames: Vec::new(),
         }
     }
 }
@@ -197,7 +207,7 @@ impl Executor {
             Value::List(mut values) => {
                 let mut drain = values.drain(0..values.len());
                 let Value::Atom(name) = drain.next().unwrap() else {
-                    panic!();
+                    return Err(Error::InvalidType);
                 };
 
                 for param in drain {
@@ -253,6 +263,126 @@ impl Executor {
         Ok(())
     }
 
+    fn execute_instruction(self: &mut Executor, instruction: Instruction) -> Result<(), Error> {
+        // eprintln!("Current Instruction: {instruction:?}");
+        // eprintln!("Instructions: {:?}", self.instructions);
+        // eprintln!("Stack: {:?}", self.stack);
+        // eprintln!();
+        // std::thread::sleep(std::time::Duration::from_secs(1));
+
+        match instruction {
+            Instruction::Push(value) => {
+                self.stack.push(value);
+            }
+            Instruction::Store(name) => {
+                self.env.set(name, self.stack.pop().unwrap());
+            }
+            Instruction::Load(name) => {
+                let value = self.env.get(&name).ok_or(Error::UnknownSymbol(name))?;
+                self.stack.push(value.clone());
+            }
+            Instruction::Call => {
+                let func = self.stack.pop().unwrap();
+
+                match func {
+                    Value::Function(f) => {
+                        self.inject_function(f)?;
+                    }
+                    _ => return Err(Error::FunctionNotFound),
+                }
+            }
+            Instruction::PushScope => {
+                self.env.push_scope();
+            }
+            Instruction::PushDefinedScope(scope) => {
+                self.env.push_given_scope(scope);
+            }
+            Instruction::PopScope => {
+                self.env.pop_scope();
+            }
+            Instruction::Add => binary_op!(self, +),
+            Instruction::Sub => binary_op!(self, -),
+            Instruction::Mult => binary_op!(self, *),
+            Instruction::Div => binary_op!(self, /),
+            Instruction::Eq => binary_op!(self, ==),
+            Instruction::NotEq => binary_op!(self, !=),
+            Instruction::Lt => binary_op!(self, <),
+            Instruction::Lte => binary_op!(self, <=),
+            Instruction::Gt => binary_op!(self, >),
+            Instruction::Gte => binary_op!(self, >=),
+            Instruction::Sqrt => {
+                let Value::Decimal(value) = self.stack.pop().unwrap() else {
+                    return Err(Error::InvalidType);
+                };
+
+                self.stack.push(Value::Decimal(value.sqrt()));
+            }
+            Instruction::Pow => {
+                let (Value::Decimal(base), Value::Decimal(exp)) =
+                    (self.stack.pop().unwrap(), self.stack.pop().unwrap())
+                else {
+                    return Err(Error::InvalidType);
+                };
+
+                self.stack.push(Value::Decimal(base.pow(exp)));
+            }
+            Instruction::If => {
+                let Value::Decimal(condition) = self.stack.pop().unwrap() else {
+                    return Err(Error::InvalidType);
+                };
+
+                let then_branch = self.stack.pop().unwrap();
+                let else_branch = self.stack.pop().unwrap();
+
+                let mut injector = Injector {
+                    instructions: &mut self.instructions,
+                    index: 0,
+                };
+
+                if condition == Decimal::ONE {
+                    Self::inject_compiled(then_branch, &mut injector)?;
+                } else {
+                    Self::inject_compiled(else_branch, &mut injector)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn eval(&mut self, expr: Value) -> Result<Value, Error> {
+        let frame = CallFrame {
+            instructions: std::mem::take(&mut self.instructions),
+            stack_len: self.stack.len(),
+        };
+
+        self.frames.push(frame);
+        self.env.push_scope();
+        self.instructions.clear();
+
+        Self::inject_compiled(
+            expr,
+            &mut Injector {
+                instructions: &mut self.instructions,
+                index: 0,
+            },
+        )?;
+
+        while let Some(instruction) = self.instructions.pop_front() {
+            self.execute_instruction(instruction)?;
+        }
+
+        let result = self.stack.pop().ok_or(Error::EmptyStack)?;
+
+        self.env.pop_scope();
+
+        let frame = self.frames.pop().unwrap();
+        self.instructions = frame.instructions;
+        self.stack.truncate(frame.stack_len);
+
+        Ok(result)
+    }
+
     pub fn execute(&mut self, value: Value) -> Result<Value, Error> {
         self.instructions.clear();
         Self::inject_compiled(
@@ -265,88 +395,7 @@ impl Executor {
         self.stack.clear();
 
         while let Some(instruction) = self.instructions.pop_front() {
-            // eprintln!("Current Instruction: {instruction:?}");
-            // eprintln!("Instructions: {:?}", self.instructions);
-            // eprintln!("Stack: {:?}", self.stack);
-            // eprintln!();
-            // sleep(Duration::from_secs(1));
-
-            match instruction {
-                Instruction::Push(value) => {
-                    self.stack.push(value);
-                }
-                Instruction::Store(name) => {
-                    self.env.set(name, self.stack.pop().unwrap());
-                }
-                Instruction::Load(name) => {
-                    let value = self.env.get(&name).ok_or(Error::UnknownSymbol(name))?;
-                    self.stack.push(value.clone());
-                }
-                Instruction::Call => {
-                    let func = self.stack.pop().unwrap();
-
-                    match func {
-                        Value::Function(f) => {
-                            self.inject_function(f)?;
-                        }
-                        _ => return Err(Error::FunctionNotFound),
-                    }
-                }
-                Instruction::PushScope => {
-                    self.env.push_scope();
-                }
-                Instruction::PushDefinedScope(scope) => {
-                    self.env.push_given_scope(scope);
-                }
-                Instruction::PopScope => {
-                    self.env.pop_scope();
-                }
-                Instruction::Add => binary_op!(self, +),
-                Instruction::Sub => binary_op!(self, -),
-                Instruction::Mult => binary_op!(self, *),
-                Instruction::Div => binary_op!(self, /),
-                Instruction::Eq => binary_op!(self, ==),
-                Instruction::NotEq => binary_op!(self, !=),
-                Instruction::Lt => binary_op!(self, <),
-                Instruction::Lte => binary_op!(self, <=),
-                Instruction::Gt => binary_op!(self, >),
-                Instruction::Gte => binary_op!(self, >=),
-                Instruction::Sqrt => {
-                    let Value::Decimal(value) = self.stack.pop().unwrap() else {
-                        panic!()
-                    };
-
-                    self.stack.push(Value::Decimal(value.sqrt()));
-                }
-                Instruction::Pow => {
-                    let (Value::Decimal(base), Value::Decimal(exp)) =
-                        (self.stack.pop().unwrap(), self.stack.pop().unwrap())
-                    else {
-                        panic!()
-                    };
-
-                    self.stack.push(Value::Decimal(base.pow(exp)));
-                }
-                Instruction::If => {
-                    let Value::Decimal(condition) = self.stack.pop().unwrap() else {
-                        panic!();
-                    };
-
-                    let then_branch = self.stack.pop().unwrap();
-                    let else_branch = self.stack.pop().unwrap();
-
-                    let mut injector = Injector {
-                        instructions: &mut self.instructions,
-                        index: 0,
-                    };
-
-                    if condition == Decimal::ONE {
-                        Self::inject_compiled(then_branch, &mut injector)?;
-                    } else {
-                        Self::inject_compiled(else_branch, &mut injector)?;
-                    }
-                }
-            }
+            self.execute_instruction(instruction)?;
         }
 
         Ok(self.stack.pop().unwrap())
