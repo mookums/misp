@@ -1,24 +1,25 @@
-use crate::{Error, Executor, Injector, Instruction};
+use misp_num::decimal::Decimal;
 
-pub fn builtin_if(executor: &mut Executor) -> Result<(), Error> {
-    let mut injector = Injector {
-        instructions: &mut executor.instructions,
-        index: 0,
+use crate::{Error, Executor, Value};
+
+pub fn builtin_if(executor: &mut Executor) -> Result<Value, Error> {
+    let (else_thunk, then_thunk, condition_thunk) = (
+        executor.stack.pop().ok_or(Error::EmptyStack)?,
+        executor.stack.pop().ok_or(Error::EmptyStack)?,
+        executor.stack.pop().ok_or(Error::EmptyStack)?,
+    );
+
+    let Value::Decimal(condition) = executor.eval(condition_thunk)? else {
+        return Err(Error::InvalidType);
     };
 
-    injector.inject(Instruction::Push(
-        executor.stack.pop().ok_or(Error::EmptyStack)?,
-    ));
-    injector.inject(Instruction::Push(
-        executor.stack.pop().ok_or(Error::EmptyStack)?,
-    ));
-    Executor::inject_compiled(
-        executor.stack.pop().ok_or(Error::EmptyStack)?,
-        &mut injector,
-    )?;
-    injector.inject(Instruction::If);
+    let next = if condition == Decimal::ONE {
+        executor.eval(then_thunk)?
+    } else {
+        executor.eval(else_thunk)?
+    };
 
-    Ok(())
+    Ok(next)
 }
 
 // pub fn builtin_let(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {

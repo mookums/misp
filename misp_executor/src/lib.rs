@@ -14,7 +14,7 @@ use crate::{
         math::{
             builtin_add, builtin_divide, builtin_equal, builtin_factorial, builtin_gt, builtin_gte,
             builtin_lt, builtin_lte, builtin_minus, builtin_multiply, builtin_not_equal,
-            builtin_pow, builtin_sqrt,
+            builtin_pow, builtin_sqrt, builtin_summate,
         },
     },
     config::Config,
@@ -28,7 +28,7 @@ pub struct Lambda {
     pub scope: Scope,
 }
 
-type NativeMispFunction = fn(&mut Executor) -> Result<(), Error>;
+type NativeMispFunction = fn(&mut Executor) -> Result<Value, Error>;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeMispFunction {
@@ -70,32 +70,6 @@ pub enum Instruction {
     PushScope,
     PushDefinedScope(Scope),
     PopScope,
-    // Arithmetic Instructions
-    Add,
-    Sub,
-    Mult,
-    Div,
-    Eq,
-    NotEq,
-    Lt,
-    Lte,
-    Gt,
-    Gte,
-    Sqrt,
-    Pow,
-    If,
-}
-
-macro_rules! binary_op {
-    ($s: ident, $op :tt) => {{
-        let (Value::Decimal(first), Value::Decimal(second)) =
-            ($s.stack.pop().ok_or(Error::EmptyStack)?, $s.stack.pop().ok_or(Error::EmptyStack)?)
-        else {
-            return Err(Error::InvalidType)
-        };
-
-        $s.stack.push(Value::Decimal(Decimal::from(first $op second)));
-    }};
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -176,7 +150,7 @@ impl Default for Executor {
         env.define_native_function(">=", builtin_gte);
         env.define_native_function("pow", builtin_pow);
         env.define_native_function("sqrt", builtin_sqrt);
-        // env.define_native_function("summate", builtin_summate);
+        env.define_native_function("summate", builtin_summate);
         env.define_native_function("factorial", builtin_factorial);
 
         // Trig Functions
@@ -223,16 +197,22 @@ impl Executor {
     }
 
     pub fn inject_function(&mut self, function: Function) -> Result<(), Error> {
-        let mut injector = Injector {
-            instructions: &mut self.instructions,
-            index: 0,
-        };
-
         match function {
             Function::Native(f) => {
-                f(self)?;
+                let value = f(self)?;
+
+                let mut injector = Injector {
+                    instructions: &mut self.instructions,
+                    index: 0,
+                };
+                injector.inject(Instruction::Push(value));
             }
             Function::Runtime(f) => {
+                let mut injector = Injector {
+                    instructions: &mut self.instructions,
+                    index: 0,
+                };
+
                 injector.inject(Instruction::PushScope);
 
                 // Reverse order ensures the correct value->name binding here.
@@ -246,6 +226,11 @@ impl Executor {
                 injector.inject(Instruction::PopScope);
             }
             Function::Lambda(l) => {
+                let mut injector = Injector {
+                    instructions: &mut self.instructions,
+                    index: 0,
+                };
+
                 injector.inject(Instruction::PushDefinedScope(l.scope));
 
                 // Reverse order ensures the correct value->name binding here.
@@ -301,51 +286,6 @@ impl Executor {
             Instruction::PopScope => {
                 self.env.pop_scope();
             }
-            Instruction::Add => binary_op!(self, +),
-            Instruction::Sub => binary_op!(self, -),
-            Instruction::Mult => binary_op!(self, *),
-            Instruction::Div => binary_op!(self, /),
-            Instruction::Eq => binary_op!(self, ==),
-            Instruction::NotEq => binary_op!(self, !=),
-            Instruction::Lt => binary_op!(self, <),
-            Instruction::Lte => binary_op!(self, <=),
-            Instruction::Gt => binary_op!(self, >),
-            Instruction::Gte => binary_op!(self, >=),
-            Instruction::Sqrt => {
-                let Value::Decimal(value) = self.stack.pop().unwrap() else {
-                    return Err(Error::InvalidType);
-                };
-
-                self.stack.push(Value::Decimal(value.sqrt()));
-            }
-            Instruction::Pow => {
-                let (Value::Decimal(base), Value::Decimal(exp)) =
-                    (self.stack.pop().unwrap(), self.stack.pop().unwrap())
-                else {
-                    return Err(Error::InvalidType);
-                };
-
-                self.stack.push(Value::Decimal(base.pow(exp)));
-            }
-            Instruction::If => {
-                let Value::Decimal(condition) = self.stack.pop().unwrap() else {
-                    return Err(Error::InvalidType);
-                };
-
-                let then_branch = self.stack.pop().unwrap();
-                let else_branch = self.stack.pop().unwrap();
-
-                let mut injector = Injector {
-                    instructions: &mut self.instructions,
-                    index: 0,
-                };
-
-                if condition == Decimal::ONE {
-                    Self::inject_compiled(then_branch, &mut injector)?;
-                } else {
-                    Self::inject_compiled(else_branch, &mut injector)?;
-                }
-            }
         }
 
         Ok(())
@@ -359,7 +299,6 @@ impl Executor {
 
         self.frames.push(frame);
         self.env.push_scope();
-        self.instructions.clear();
 
         Self::inject_compiled(
             expr,
@@ -384,8 +323,42 @@ impl Executor {
         Ok(result)
     }
 
+    pub fn eval_function(&mut self, function: Function, args: Vec<Value>) -> Result<Value, Error> {
+        let result = match function {
+            Function::Native(f) => {
+                for arg in args.into_iter() {
+                    self.stack.push(arg);
+                }
+
+                f(self)?
+            }
+            Function::Runtime(rt) => {
+                self.env.push_scope();
+                for (param, value) in rt.params.into_iter().zip(args.into_iter()) {
+                    self.env.set(param, value);
+                }
+                let result = self.eval(*rt.body)?;
+                self.env.pop_scope();
+                result
+            }
+            Function::Lambda(lambda) => {
+                self.env.push_given_scope(lambda.scope);
+                for (param, value) in lambda.params.into_iter().zip(args.into_iter()) {
+                    self.env.set(param, value);
+                }
+                let result = self.eval(*lambda.body)?;
+                self.env.pop_scope();
+                result
+            }
+        };
+
+        Ok(result)
+    }
+
     pub fn execute(&mut self, value: Value) -> Result<Value, Error> {
         self.instructions.clear();
+        self.stack.clear();
+
         Self::inject_compiled(
             value,
             &mut Injector {
@@ -393,7 +366,6 @@ impl Executor {
                 index: 0,
             },
         )?;
-        self.stack.clear();
 
         while let Some(instruction) = self.instructions.pop_front() {
             self.execute_instruction(instruction)?;

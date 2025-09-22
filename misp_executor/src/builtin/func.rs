@@ -1,16 +1,11 @@
-use crate::{Error, Executor, Function, Injector, Instruction, Lambda, RuntimeMispFunction, Value};
+use crate::{Error, Executor, Function, Lambda, RuntimeMispFunction, Value};
 
-pub fn builtin_func(executor: &mut Executor) -> Result<(), Error> {
+pub fn builtin_func(executor: &mut Executor) -> Result<Value, Error> {
     let (body, params_thunk, name) = (
         executor.stack.pop().ok_or(Error::EmptyStack)?,
         executor.stack.pop().ok_or(Error::EmptyStack)?,
         executor.stack.pop().ok_or(Error::EmptyStack)?,
     );
-
-    let mut injector = Injector {
-        instructions: &mut executor.instructions,
-        index: 0,
-    };
 
     let params = match params_thunk {
         Value::List(param_list) => {
@@ -35,14 +30,11 @@ pub fn builtin_func(executor: &mut Executor) -> Result<(), Error> {
         body: Box::new(body),
     }));
 
-    injector.inject(Instruction::Push(function.clone()));
-    injector.inject(Instruction::Store(name));
-    injector.inject(Instruction::Push(function));
-
-    Ok(())
+    executor.env.set(name, function.clone());
+    Ok(function)
 }
 
-pub fn builtin_lambda(executor: &mut Executor) -> Result<(), Error> {
+pub fn builtin_lambda(executor: &mut Executor) -> Result<Value, Error> {
     let (body, params_thunk) = (
         executor.stack.pop().ok_or(Error::EmptyStack)?,
         executor.stack.pop().ok_or(Error::EmptyStack)?,
@@ -68,11 +60,5 @@ pub fn builtin_lambda(executor: &mut Executor) -> Result<(), Error> {
         scope: executor.env.current_scope().clone(),
     }));
 
-    let mut injector = Injector {
-        instructions: &mut executor.instructions,
-        index: 0,
-    };
-
-    injector.inject(Instruction::Push(lambda));
-    Ok(())
+    Ok(lambda)
 }

@@ -55,9 +55,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| misp.eval("(square 15)").unwrap());
     });
 
-    // c.bench_function("interp small summate", |b| {
-    //     b.iter(|| misp.eval("(summate 0 10 sqrt)").unwrap());
-    // });
+    c.bench_function("interp small summate", |b| {
+        b.iter(|| misp.eval("(summate 0 10 sqrt)").unwrap());
+    });
 
     c.bench_function("interp pi constant", |b| {
         b.iter(|| misp.eval("pi").unwrap());
