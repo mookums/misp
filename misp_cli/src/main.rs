@@ -85,10 +85,13 @@ impl App {
 
         self.history.push(format!("misp >> {}", line));
 
+        let start = Instant::now();
         match self.misp.eval(&line) {
             Ok(value) => self.history.push(Misp::print(&value)),
             Err(err) => self.history.push(format!("{}", err)),
         }
+        let end = start.elapsed();
+        self.history.push(format!("took {}ms", end.as_millis()));
 
         self.input.clear();
         self.cursor = 0;

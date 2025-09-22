@@ -8,9 +8,14 @@ use misp_num::decimal::Decimal;
 use misp_parser::SExpr;
 
 use crate::{
-    builtin::math::{
-        builtin_add, builtin_divide, builtin_equal, builtin_gt, builtin_gte, builtin_lt,
-        builtin_lte, builtin_minus, builtin_multiply, builtin_not_equal,
+    builtin::{
+        control::builtin_if,
+        func::{builtin_func, builtin_lambda},
+        math::{
+            builtin_add, builtin_divide, builtin_equal, builtin_factorial, builtin_gt, builtin_gte,
+            builtin_lt, builtin_lte, builtin_minus, builtin_multiply, builtin_not_equal,
+            builtin_pow, builtin_sqrt,
+        },
     },
     config::Config,
     environment::{Environment, Scope},
@@ -62,6 +67,7 @@ pub enum Instruction {
     Store(String),
     Load(String),
     Call,
+    PushScope,
     PushDefinedScope(Scope),
     PopScope,
     // Arithmetic Instructions
@@ -82,7 +88,7 @@ pub enum Instruction {
 
 macro_rules! binary_op {
     ($s: ident, $op:tt) => {{
-        let (Value::Decimal(second), Value::Decimal(first)) =
+        let (Value::Decimal(first), Value::Decimal(second)) =
             ($s.stack.pop().unwrap(), $s.stack.pop().unwrap())
         else {
             panic!()
@@ -140,12 +146,11 @@ impl Default for Executor {
         env.set("pi", Value::Decimal(Decimal::PI));
         env.set("e", Value::Decimal(Decimal::E));
 
-        // env.define_native_function("func", builtin_func);
-        // env.define_native_function("letFunc", builtin_let_func);
-        // env.define_native_function("lambda", builtin_lambda);
+        env.define_native_function("func", builtin_func);
+        env.define_native_function("lambda", builtin_lambda);
 
         // Control Flow Functions
-        // env.define_native_function("if", builtin_if);
+        env.define_native_function("if", builtin_if);
         // env.define_native_function("let", builtin_let);
 
         // Math Functions
@@ -160,10 +165,10 @@ impl Default for Executor {
         env.define_native_function("<=", builtin_lte);
         env.define_native_function(">", builtin_gt);
         env.define_native_function(">=", builtin_gte);
-        // env.define_native_function("pow", builtin_pow);
-        // env.define_native_function("sqrt", builtin_sqrt);
+        env.define_native_function("pow", builtin_pow);
+        env.define_native_function("sqrt", builtin_sqrt);
         // env.define_native_function("summate", builtin_summate);
-        // env.define_native_function("factorial", builtin_factorial);
+        env.define_native_function("factorial", builtin_factorial);
 
         // Trig Functions
         // env.define_native_function("sin", builtin_sin);
@@ -218,17 +223,25 @@ impl Executor {
                 f(self)?;
             }
             Function::Runtime(f) => {
-                for param in f.params.into_iter() {
-                    injector.inject(Instruction::Push(self.stack.pop().unwrap()));
+                injector.inject(Instruction::PushScope);
+
+                // Reverse order ensures the correct value->name binding here.
+                for param in f.params.into_iter().rev() {
+                    Self::inject_compiled(self.stack.pop().unwrap(), &mut injector)?;
+                    // injector.inject(Instruction::Push(self.stack.pop().unwrap()));
                     injector.inject(Instruction::Store(param));
                 }
 
                 Self::inject_compiled(*f.body, &mut injector)?;
+                injector.inject(Instruction::PopScope);
             }
             Function::Lambda(l) => {
                 injector.inject(Instruction::PushDefinedScope(l.scope));
-                for param in l.params.into_iter() {
-                    injector.inject(Instruction::Push(self.stack.pop().unwrap()));
+
+                // Reverse order ensures the correct value->name binding here.
+                for param in l.params.into_iter().rev() {
+                    Self::inject_compiled(self.stack.pop().unwrap(), &mut injector)?;
+                    // injector.inject(Instruction::Push(self.stack.pop().unwrap()));
                     injector.inject(Instruction::Store(param));
                 }
 
@@ -255,28 +268,11 @@ impl Executor {
             // eprintln!("Current Instruction: {instruction:?}");
             // eprintln!("Instructions: {:?}", self.instructions);
             // eprintln!("Stack: {:?}", self.stack);
-            // sleep(Duration::from_secs(2));
+            // eprintln!();
+            // sleep(Duration::from_secs(1));
 
             match instruction {
                 Instruction::Push(value) => {
-                    // Pseudo-pipelining
-                    if let Some(instr) = self.instructions.front() {
-                        match instr {
-                            Instruction::Store(_) => {
-                                let Instruction::Store(name) =
-                                    self.instructions.pop_front().unwrap()
-                                else {
-                                    unreachable!()
-                                };
-
-                                self.env.set(name, value);
-                                continue;
-                            }
-                            Instruction::Call => todo!(),
-                            _ => {}
-                        }
-                    }
-
                     self.stack.push(value);
                 }
                 Instruction::Store(name) => {
@@ -296,6 +292,9 @@ impl Executor {
                         _ => return Err(Error::FunctionNotFound),
                     }
                 }
+                Instruction::PushScope => {
+                    self.env.push_scope();
+                }
                 Instruction::PushDefinedScope(scope) => {
                     self.env.push_given_scope(scope);
                 }
@@ -312,9 +311,41 @@ impl Executor {
                 Instruction::Lte => binary_op!(self, <=),
                 Instruction::Gt => binary_op!(self, >),
                 Instruction::Gte => binary_op!(self, >=),
-                Instruction::Sqrt => todo!(),
-                Instruction::Pow => todo!(),
-                Instruction::If => todo!(),
+                Instruction::Sqrt => {
+                    let Value::Decimal(value) = self.stack.pop().unwrap() else {
+                        panic!()
+                    };
+
+                    self.stack.push(Value::Decimal(value.sqrt()));
+                }
+                Instruction::Pow => {
+                    let (Value::Decimal(base), Value::Decimal(exp)) =
+                        (self.stack.pop().unwrap(), self.stack.pop().unwrap())
+                    else {
+                        panic!()
+                    };
+
+                    self.stack.push(Value::Decimal(base.pow(exp)));
+                }
+                Instruction::If => {
+                    let Value::Decimal(condition) = self.stack.pop().unwrap() else {
+                        panic!();
+                    };
+
+                    let then_branch = self.stack.pop().unwrap();
+                    let else_branch = self.stack.pop().unwrap();
+
+                    let mut injector = Injector {
+                        instructions: &mut self.instructions,
+                        index: 0,
+                    };
+
+                    if condition == Decimal::ONE {
+                        Self::inject_compiled(then_branch, &mut injector)?;
+                    } else {
+                        Self::inject_compiled(else_branch, &mut injector)?;
+                    }
+                }
             }
         }
 

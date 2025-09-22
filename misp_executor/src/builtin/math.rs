@@ -1,8 +1,9 @@
-use crate::{Error, Executor, Injector, Instruction, Value};
 use misp_num::decimal::Decimal;
 
+use crate::{Error, Executor, Injector, Instruction, Value};
+
 macro_rules! binary_op {
-    ($name:ident, $op_name:literal, $op:tt) => {
+    ($name:ident, $op_name:literal, $instr:ident) => {
         pub fn $name(executor: &mut Executor) -> Result<(), Error> {
             let mut injector = Injector {
                 instructions: &mut executor.instructions,
@@ -11,22 +12,22 @@ macro_rules! binary_op {
 
             Executor::inject_compiled(executor.stack.pop().unwrap(), &mut injector)?;
             Executor::inject_compiled(executor.stack.pop().unwrap(), &mut injector)?;
-            injector.inject(Instruction::Add);
+            injector.inject(Instruction::$instr);
             Ok(())
         }
     };
 }
 
-binary_op!(builtin_add, "+", +);
-binary_op!(builtin_minus, "-", -);
-binary_op!(builtin_multiply, "*", *);
-binary_op!(builtin_divide, "/", /);
-binary_op!(builtin_equal, "==", ==);
-binary_op!(builtin_not_equal, "!=", !=);
-binary_op!(builtin_lt, "<", <);
-binary_op!(builtin_lte, "<=", <=);
-binary_op!(builtin_gt, ">", >);
-binary_op!(builtin_gte, ">=", >=);
+binary_op!(builtin_add, "+", Add);
+binary_op!(builtin_minus, "-", Sub);
+binary_op!(builtin_multiply, "*", Mult);
+binary_op!(builtin_divide, "/", Div);
+binary_op!(builtin_equal, "==", Eq);
+binary_op!(builtin_not_equal, "!=", NotEq);
+binary_op!(builtin_lt, "<", Lt);
+binary_op!(builtin_lte, "<=", Lte);
+binary_op!(builtin_gt, ">", Gt);
+binary_op!(builtin_gte, ">=", Gte);
 
 // pub fn builtin_mod(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
 //     if args.len() != 2 {
@@ -78,43 +79,28 @@ binary_op!(builtin_gte, ">=", >=);
 //     Ok(Value::Integer(left % right))
 // }
 
-// pub fn builtin_sqrt(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
-//     if args.len() != 1 {
-//         return Err(Error::FunctionArity {
-//             name: "sqrt".to_string(),
-//             expected: 1,
-//             actual: args.len(),
-//         });
-//     }
+pub fn builtin_sqrt(executor: &mut Executor) -> Result<(), Error> {
+    let mut injector = Injector {
+        instructions: &mut executor.instructions,
+        index: 0,
+    };
 
-//     let inner = executor.evaluate(&args[0])?;
+    Executor::inject_compiled(executor.stack.pop().unwrap(), &mut injector)?;
+    injector.inject(Instruction::Sqrt);
+    Ok(())
+}
 
-//     match inner {
-//         Value::Decimal(d) => Ok(Value::Decimal(d.sqrt())),
-//         _ => Err(Error::FunctionCall),
-//     }
-// }
+pub fn builtin_pow(executor: &mut Executor) -> Result<(), Error> {
+    let mut injector = Injector {
+        instructions: &mut executor.instructions,
+        index: 0,
+    };
 
-// pub fn builtin_pow(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
-//     if args.len() != 2 {
-//         return Err(Error::FunctionArity {
-//             name: "pow".to_string(),
-//             expected: 2,
-//             actual: args.len(),
-//         });
-//     }
-
-//     let Value::Decimal(left) = executor.evaluate(&args[0])? else {
-//         return Err(Error::FunctionCall);
-//     };
-
-//     let right = executor.evaluate(&args[1])?;
-
-//     match right {
-//         Value::Decimal(d) => Ok(Value::Decimal(d.pow(left))),
-//         _ => todo!("Unsupported type for pow"),
-//     }
-// }
+    Executor::inject_compiled(executor.stack.pop().unwrap(), &mut injector)?;
+    Executor::inject_compiled(executor.stack.pop().unwrap(), &mut injector)?;
+    injector.inject(Instruction::Pow);
+    Ok(())
+}
 
 // pub fn builtin_summate(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
 //     if args.len() != 3 {
@@ -160,29 +146,57 @@ binary_op!(builtin_gte, ">=", >=);
 //     Ok(Value::Decimal(ret))
 // }
 
-// pub fn builtin_factorial(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
-//     if args.len() != 1 {
-//         return Err(Error::FunctionArity {
-//             name: "factorial".to_string(),
-//             expected: 1,
-//             actual: args.len(),
-//         });
-//     }
-
-//     let Value::Decimal(n) = executor.evaluate(&args[0])? else {
-//         return Err(Error::FunctionCall);
+// pub fn builtin_factorial(executor: &mut Executor) -> Result<(), Error> {
+//     let mut injector = Injector {
+//         instructions: &mut executor.instructions,
+//         index: 0,
 //     };
 
-//     let count = n.to_u128() as u64;
+//     Executor::inject_compiled(executor.stack.pop().unwrap(), &mut injector)?;
 
-//     if count == 0 || count == 1 {
-//         return Ok(Value::Decimal(Decimal::ONE));
-//     }
-
-//     let mut result = Decimal::ONE;
-//     for i in 2..=count {
-//         result *= Decimal::from_unsigned(i)
-//     }
-
-//     Ok(Value::Decimal(result))
+//     Ok(())
 // }
+
+pub fn builtin_factorial(executor: &mut Executor) -> Result<(), Error> {
+    let mut injector = Injector {
+        instructions: &mut executor.instructions,
+        index: 0,
+    };
+
+    let Value::Decimal(n) = executor.stack.pop().unwrap() else {
+        panic!("factorial expects a number");
+    };
+
+    // Convert to integer for the loop
+    let n_int = n.to_u128();
+
+    if n_int <= 1 {
+        // Base case: factorial(0) = factorial(1) = 1
+        injector.inject(Instruction::Push(Value::Decimal(Decimal::from(1))));
+        return Ok(());
+    }
+
+    // Fully unroll: compute n * (n-1) * (n-2) * ... * 2 * 1
+    // We'll build this as nested multiplications: (* n (* (n-1) (* (n-2) ... (* 2 1))))
+
+    // Start with the innermost multiplication: (* 2 1)
+    let mut expression = Value::List(vec![
+        Value::Atom("*".to_string()),
+        Value::Decimal(Decimal::from(2)),
+        Value::Decimal(Decimal::from(1)),
+    ]);
+
+    // Build outward: (* 3 (* 2 1)), then (* 4 (* 3 (* 2 1))), etc.
+    for i in 3..=n_int {
+        expression = Value::List(vec![
+            Value::Atom("*".to_string()),
+            Value::Decimal(Decimal::from(i as u64)),
+            expression,
+        ]);
+    }
+
+    // Inject the fully unrolled expression
+    Executor::inject_compiled(expression, &mut injector)?;
+
+    Ok(())
+}

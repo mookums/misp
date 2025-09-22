@@ -30,7 +30,7 @@ impl Environment {
     }
 
     pub fn pop_scope(&mut self) {
-        assert!(self.scopes.len() > 1);
+        debug_assert!(self.scopes.len() > 1);
         self.scopes.pop();
     }
 
