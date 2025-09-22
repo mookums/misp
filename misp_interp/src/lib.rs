@@ -2,7 +2,7 @@ use misp_executor::{Executor, Function, Value};
 use misp_lexer::Lexer;
 use misp_parser::Parser;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Default)]
 pub struct Misp {
     lexer: Lexer,
     parser: Parser,

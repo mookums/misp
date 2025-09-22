@@ -1,25 +1,29 @@
 use misp_num::decimal::Decimal;
 
-use crate::{Error, Executor, Value};
+use crate::{Error, Executor, NativeMispFuture, Value};
 
-pub fn builtin_if(executor: &mut Executor) -> Result<Value, Error> {
-    let (else_thunk, then_thunk, condition_thunk) = (
-        executor.stack.pop().ok_or(Error::EmptyStack)?,
-        executor.stack.pop().ok_or(Error::EmptyStack)?,
-        executor.stack.pop().ok_or(Error::EmptyStack)?,
-    );
+pub fn builtin_if(executor: *mut Executor) -> NativeMispFuture {
+    Box::pin(async move {
+        let executor = unsafe { &mut *executor };
 
-    let Value::Decimal(condition) = executor.eval(condition_thunk)? else {
-        return Err(Error::InvalidType);
-    };
+        let (else_thunk, then_thunk, condition_thunk) = (
+            executor.stack.pop().ok_or(Error::EmptyStack)?,
+            executor.stack.pop().ok_or(Error::EmptyStack)?,
+            executor.stack.pop().ok_or(Error::EmptyStack)?,
+        );
 
-    let next = if condition == Decimal::ONE {
-        executor.eval(then_thunk)?
-    } else {
-        executor.eval(else_thunk)?
-    };
+        let Value::Decimal(condition) = executor.eval(condition_thunk).await? else {
+            return Err(Error::InvalidType);
+        };
 
-    Ok(next)
+        let next = if condition == Decimal::ONE {
+            executor.eval(then_thunk).await?
+        } else {
+            executor.eval(else_thunk).await?
+        };
+
+        Ok(next)
+    })
 }
 
 // pub fn builtin_let(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {

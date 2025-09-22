@@ -2,7 +2,11 @@ mod builtin;
 pub mod config;
 pub mod environment;
 
-use std::collections::VecDeque;
+use std::{
+    collections::{BTreeMap, VecDeque},
+    pin::{Pin, pin},
+    task::{Context, Poll, Waker},
+};
 
 use misp_num::decimal::Decimal;
 use misp_parser::SExpr;
@@ -10,11 +14,11 @@ use misp_parser::SExpr;
 use crate::{
     builtin::{
         control::builtin_if,
-        func::{builtin_func, builtin_lambda},
+        func::builtin_func,
         math::{
             builtin_add, builtin_divide, builtin_equal, builtin_factorial, builtin_gt, builtin_gte,
             builtin_lt, builtin_lte, builtin_minus, builtin_multiply, builtin_not_equal,
-            builtin_pow, builtin_sqrt, builtin_summate,
+            builtin_pow, builtin_sqrt,
         },
     },
     config::Config,
@@ -28,7 +32,8 @@ pub struct Lambda {
     pub scope: Scope,
 }
 
-type NativeMispFunction = fn(&mut Executor) -> Result<Value, Error>;
+type NativeMispFuture = Pin<Box<dyn Future<Output = Result<Value, Error>> + 'static>>;
+type NativeMispFunction = fn(*mut Executor) -> NativeMispFuture;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeMispFunction {
@@ -70,6 +75,40 @@ pub enum Instruction {
     PushScope,
     PushDefinedScope(Scope),
     PopScope,
+    Resume(usize),
+    Await(usize),
+}
+
+#[derive(Debug, Default)]
+pub struct EvalFutureContext {
+    result: Option<Result<Value, Error>>,
+    waker: Option<Waker>,
+}
+
+pub struct EvalFuture {
+    id: usize,
+    executor: *mut Executor,
+}
+
+impl Future for EvalFuture {
+    type Output = Result<Value, Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        let fut = self.get_mut();
+        let executor = unsafe { &mut *fut.executor };
+
+        if let Some(future_data) = executor.futures.get_mut(&fut.id) {
+            if let Some(result) = future_data.result.take() {
+                executor.futures.remove(&fut.id);
+                Poll::Ready(result)
+            } else {
+                future_data.waker = Some(cx.waker().clone());
+                Poll::Pending
+            }
+        } else {
+            panic!("Future {} not found", fut.id)
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -98,25 +137,29 @@ pub struct Injector<'a> {
 }
 
 impl<'a> Injector<'a> {
+    pub fn new(instructions: &'a mut VecDeque<Instruction>) -> Self {
+        Self {
+            instructions,
+            index: 0,
+        }
+    }
+
     pub fn inject(&mut self, instruction: Instruction) {
         self.instructions.insert(self.index, instruction);
         self.index += 1;
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct CallFrame {
-    instructions: VecDeque<Instruction>,
-    stack_len: usize,
-}
-
-#[derive(Debug, Clone)]
 pub struct Executor {
     pub config: Config,
     pub env: Environment,
     pub instructions: VecDeque<Instruction>,
     pub stack: Vec<Value>,
-    pub frames: Vec<CallFrame>,
+
+    pub waker: &'static Waker,
+    pub futures: BTreeMap<usize, EvalFutureContext>,
+    pub native_futures: BTreeMap<usize, NativeMispFuture>,
+    pub next_future_id: usize,
 }
 
 impl Default for Executor {
@@ -130,7 +173,7 @@ impl Default for Executor {
         env.set("e", Value::Decimal(Decimal::E));
 
         env.define_native_function("func", builtin_func);
-        env.define_native_function("lambda", builtin_lambda);
+        // env.define_native_function("lambda", builtin_lambda);
 
         // Control Flow Functions
         env.define_native_function("if", builtin_if);
@@ -150,7 +193,7 @@ impl Default for Executor {
         env.define_native_function(">=", builtin_gte);
         env.define_native_function("pow", builtin_pow);
         env.define_native_function("sqrt", builtin_sqrt);
-        env.define_native_function("summate", builtin_summate);
+        // env.define_native_function("summate", builtin_summate);
         env.define_native_function("factorial", builtin_factorial);
 
         // Trig Functions
@@ -164,9 +207,12 @@ impl Default for Executor {
         Self {
             config,
             env,
-            instructions: VecDeque::new(),
-            stack: Vec::new(),
-            frames: Vec::new(),
+            instructions: VecDeque::default(),
+            stack: Vec::default(),
+            waker: Waker::noop(),
+            futures: BTreeMap::default(),
+            native_futures: BTreeMap::default(),
+            next_future_id: 0,
         }
     }
 }
@@ -199,13 +245,15 @@ impl Executor {
     pub fn inject_function(&mut self, function: Function) -> Result<(), Error> {
         match function {
             Function::Native(f) => {
-                let value = f(self)?;
+                let native_future = f(self);
 
-                let mut injector = Injector {
-                    instructions: &mut self.instructions,
-                    index: 0,
-                };
-                injector.inject(Instruction::Push(value));
+                let future_id = self.next_future_id;
+                self.next_future_id += 1;
+
+                self.native_futures.insert(future_id, native_future);
+
+                let mut injector = Injector::new(&mut self.instructions);
+                injector.inject(Instruction::Await(future_id));
             }
             Function::Runtime(f) => {
                 let mut injector = Injector {
@@ -213,7 +261,7 @@ impl Executor {
                     index: 0,
                 };
 
-                injector.inject(Instruction::PushScope);
+                // injector.inject(Instruction::PushScope);
 
                 // Reverse order ensures the correct value->name binding here.
                 for param in f.params.into_iter().rev() {
@@ -223,7 +271,7 @@ impl Executor {
                 }
 
                 Self::inject_compiled(*f.body, &mut injector)?;
-                injector.inject(Instruction::PopScope);
+                // injector.inject(Instruction::PopScope);
             }
             Function::Lambda(l) => {
                 let mut injector = Injector {
@@ -252,7 +300,8 @@ impl Executor {
         // eprintln!("Current Instruction: {instruction:?}");
         // eprintln!("Instructions: {:?}", self.instructions);
         // eprintln!("Stack: {:?}", self.stack);
-        // eprintln!("Frames: {:?}", self.frames);
+        // eprintln!("Futures: {:?}", self.futures);
+        // eprintln!("Native Futures: {:?}", self.native_futures.keys());
         // eprintln!();
         // std::thread::sleep(std::time::Duration::from_secs(1));
 
@@ -286,91 +335,76 @@ impl Executor {
             Instruction::PopScope => {
                 self.env.pop_scope();
             }
+            Instruction::Resume(id) => {
+                let value = self.stack.pop().ok_or(Error::EmptyStack)?;
+
+                if let Some(ctx) = self.futures.get_mut(&id) {
+                    ctx.result = Some(Ok(value));
+
+                    if let Some(waker) = ctx.waker.take() {
+                        waker.wake();
+                    }
+                }
+            }
+            Instruction::Await(id) => {
+                let mut context = Context::from_waker(self.waker);
+
+                let future = self
+                    .native_futures
+                    .get_mut(&id)
+                    .expect("Native function doesnt exist");
+
+                match future.as_mut().poll(&mut context) {
+                    Poll::Ready(result) => {
+                        self.stack.push(result.unwrap());
+                        self.native_futures.remove(&id);
+                    }
+                    Poll::Pending => {
+                        self.instructions.insert(1, Instruction::Await(id));
+                    }
+                }
+            }
         }
 
         Ok(())
     }
 
-    pub fn eval(&mut self, expr: Value) -> Result<Value, Error> {
-        let frame = CallFrame {
-            instructions: std::mem::take(&mut self.instructions),
-            stack_len: self.stack.len(),
-        };
+    pub fn eval(&mut self, expr: Value) -> EvalFuture {
+        let future_id = self.next_future_id;
+        self.next_future_id += 1;
 
-        self.frames.push(frame);
-        self.env.push_scope();
+        let mut injector = Injector::new(&mut self.instructions);
 
-        Self::inject_compiled(
-            expr,
-            &mut Injector {
-                instructions: &mut self.instructions,
-                index: 0,
-            },
-        )?;
+        injector.inject(Instruction::PushScope);
+        Self::inject_compiled(expr, &mut injector).unwrap();
+        injector.inject(Instruction::Resume(future_id));
+        injector.inject(Instruction::PopScope);
 
-        while let Some(instruction) = self.instructions.pop_front() {
-            self.execute_instruction(instruction)?;
+        self.futures.insert(future_id, EvalFutureContext::default());
+
+        EvalFuture {
+            id: future_id,
+            executor: self as *mut Executor,
         }
-
-        let result = self.stack.pop().ok_or(Error::EmptyStack)?;
-
-        self.env.pop_scope();
-
-        let frame = self.frames.pop().unwrap();
-        self.instructions = frame.instructions;
-        self.stack.truncate(frame.stack_len);
-
-        Ok(result)
-    }
-
-    pub fn eval_function(&mut self, function: Function, args: Vec<Value>) -> Result<Value, Error> {
-        let result = match function {
-            Function::Native(f) => {
-                for arg in args.into_iter() {
-                    self.stack.push(arg);
-                }
-
-                f(self)?
-            }
-            Function::Runtime(rt) => {
-                self.env.push_scope();
-                for (param, value) in rt.params.into_iter().zip(args.into_iter()) {
-                    self.env.set(param, value);
-                }
-                let result = self.eval(*rt.body)?;
-                self.env.pop_scope();
-                result
-            }
-            Function::Lambda(lambda) => {
-                self.env.push_given_scope(lambda.scope);
-                for (param, value) in lambda.params.into_iter().zip(args.into_iter()) {
-                    self.env.set(param, value);
-                }
-                let result = self.eval(*lambda.body)?;
-                self.env.pop_scope();
-                result
-            }
-        };
-
-        Ok(result)
     }
 
     pub fn execute(&mut self, value: Value) -> Result<Value, Error> {
         self.instructions.clear();
         self.stack.clear();
 
-        Self::inject_compiled(
-            value,
-            &mut Injector {
-                instructions: &mut self.instructions,
-                index: 0,
-            },
-        )?;
+        let future = self.eval(value);
+        let mut main_future = pin!(future);
+        let mut context = Context::from_waker(self.waker);
 
-        while let Some(instruction) = self.instructions.pop_front() {
-            self.execute_instruction(instruction)?;
+        loop {
+            if let Some(instruction) = self.instructions.pop_front() {
+                self.execute_instruction(instruction)?;
+            }
+
+            match main_future.as_mut().poll(&mut context) {
+                Poll::Ready(result) => return result,
+                Poll::Pending => continue,
+            }
         }
-
-        Ok(self.stack.pop().unwrap())
     }
 }
