@@ -70,11 +70,11 @@ fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("interp runtime factorial", |b| {
         misp.eval("(func factorialRuntime (n) (if (<= n 1) 1 (* n (factorialRuntime (- n 1)))))")
             .unwrap();
-        b.iter(|| misp.eval("(factorialRuntime 10000)").unwrap());
+        b.iter(|| misp.eval("(factorialRuntime 1000)").unwrap());
     });
 
     c.bench_function("interp builtin factorial", |b| {
-        b.iter(|| misp.eval("(factorial 10000)").unwrap());
+        b.iter(|| misp.eval("(factorial 1000)").unwrap());
     });
 }
 
