@@ -4,7 +4,7 @@ pub mod decimal;
 pub mod number;
 // pub mod rational;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Sign {
     Positive,
     Negative,

@@ -31,7 +31,11 @@ pub fn builtin_func(executor: *mut Executor) -> NativeMispFuture {
             return Err(Error::InvalidType);
         };
 
+        let function_id = executor.next_function_id;
+        executor.next_function_id += 1;
+
         let function = Value::Function(Function::Runtime(RuntimeMispFunction {
+            id: function_id,
             params,
             body: Box::new(body),
         }));
@@ -68,7 +72,6 @@ pub fn builtin_lambda(executor: *mut Executor) -> NativeMispFuture {
         let lambda = Value::Function(Function::Lambda(Lambda {
             params,
             body: Box::new(body),
-            scope: executor.env.current_scope().clone(),
         }));
 
         Ok(lambda)

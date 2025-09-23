@@ -1,5 +1,6 @@
 use std::{
     fmt::Display,
+    hash::Hash,
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign},
     str::FromStr,
 };
@@ -386,6 +387,15 @@ impl Ord for Decimal {
                 other_aligned.value.cmp(&self_aligned.value)
             }
         }
+    }
+}
+
+impl Hash for Decimal {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let normal = self.normalize();
+        normal.value.hash(state);
+        normal.scale.hash(state);
+        normal.sign.hash(state);
     }
 }
 

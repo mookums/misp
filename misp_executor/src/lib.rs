@@ -4,6 +4,7 @@ pub mod environment;
 
 use std::{
     collections::{BTreeMap, VecDeque},
+    hash::{DefaultHasher, Hash, Hasher},
     pin::{Pin, pin},
     task::{Context, Poll, Waker},
 };
@@ -26,30 +27,30 @@ use crate::{
     environment::{Environment, Scope},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub struct Lambda {
     pub params: Vec<String>,
     pub body: Box<Value>,
-    pub scope: Scope,
 }
 
 type NativeMispFuture = Pin<Box<dyn Future<Output = Result<Value, Error>> + 'static>>;
 type NativeMispFunction = fn(*mut Executor) -> NativeMispFuture;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub struct RuntimeMispFunction {
+    pub id: usize,
     pub params: Vec<String>,
     pub body: Box<Value>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub enum Function {
     Native(NativeMispFunction),
     Runtime(RuntimeMispFunction),
     Lambda(Lambda),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub enum Value {
     Atom(String),
     List(Vec<Value>),
@@ -67,6 +68,12 @@ impl From<SExpr> for Value {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MemoKey {
+    pub id: usize,
+    pub args_hash: u64,
+}
+
 #[derive(Debug, Clone)]
 pub enum Instruction {
     Push(Value),
@@ -78,6 +85,9 @@ pub enum Instruction {
     PopScope,
     Resume(usize),
     Await(usize),
+    Marker(usize),
+    MemoCheck { id: usize, params: Vec<String> },
+    MemoStore { id: usize, params: Vec<String> },
 }
 
 #[derive(Debug, Default)]
@@ -157,6 +167,9 @@ pub struct Executor {
     pub instructions: VecDeque<Instruction>,
     pub stack: Vec<Value>,
 
+    pub memos: BTreeMap<MemoKey, Value>,
+    pub next_function_id: usize,
+
     pub waker: &'static Waker,
     pub futures: BTreeMap<usize, EvalFutureContext>,
     pub native_futures: BTreeMap<usize, NativeMispFuture>,
@@ -217,6 +230,8 @@ impl Default for Executor {
             env,
             instructions: VecDeque::default(),
             stack: Vec::default(),
+            next_function_id: 0,
+            memos: BTreeMap::default(),
             waker: Waker::noop(),
             futures: BTreeMap::default(),
             native_futures: BTreeMap::default(),
@@ -276,12 +291,24 @@ impl Executor {
                 injector.inject(Instruction::PushScope);
 
                 // Reverse order ensures the correct value->name binding here.
-                for param in f.params.into_iter().rev() {
+                for param in f.params.iter().cloned().rev() {
                     Self::compile(self.stack.pop().unwrap(), &mut injector)?;
                     injector.inject(Instruction::Store(param));
                 }
 
+                injector.inject(Instruction::MemoCheck {
+                    id: f.id,
+                    params: f.params.clone(),
+                });
+
                 Self::compile(*f.body, &mut injector)?;
+
+                injector.inject(Instruction::MemoStore {
+                    id: f.id,
+                    params: f.params,
+                });
+
+                injector.inject(Instruction::Marker(f.id));
                 injector.inject(Instruction::PopScope);
             }
             Function::Lambda(l) => {
@@ -292,7 +319,7 @@ impl Executor {
                     index: 0,
                 };
 
-                injector.inject(Instruction::PushDefinedScope(l.scope));
+                injector.inject(Instruction::PushScope);
 
                 // Reverse order ensures the correct value->name binding here.
                 for param in l.params.into_iter().rev() {
@@ -311,6 +338,7 @@ impl Executor {
     fn execute_instruction(self: &mut Executor, instruction: Instruction) -> Result<(), Error> {
         // eprintln!("Current Instruction: {instruction:?}");
         // eprintln!("Instructions: {:?}", self.instructions);
+        // eprintln!("Memos: {:?}", self.memos);
         // eprintln!("Stack: {:?}", self.stack);
         // eprintln!("Futures: {:?}", self.futures);
         // eprintln!("Native Futures: {:?}", self.native_futures.keys());
@@ -348,6 +376,45 @@ impl Executor {
             }
             Instruction::PopScope => {
                 self.env.pop_scope();
+            }
+            Instruction::Marker(_) => {}
+            Instruction::MemoCheck { id, params } => {
+                let mut hasher = DefaultHasher::default();
+                for param in params.into_iter() {
+                    let value = self.env.get(param).unwrap();
+                    value.hash(&mut hasher);
+                }
+
+                let key = MemoKey {
+                    id,
+                    args_hash: hasher.finish(),
+                };
+
+                if let Some(value) = self.memos.get(&key) {
+                    // eprintln!("Cache Hit! {key:?} -> {value:?}");
+                    self.stack.push(value.clone());
+
+                    while let Some(instruction) = self.instructions.pop_front() {
+                        if matches!(instruction, Instruction::Marker(tag) if tag == id) {
+                            break;
+                        }
+                    }
+                }
+            }
+            Instruction::MemoStore { id, params } => {
+                let mut hasher = DefaultHasher::default();
+                for param in params.into_iter() {
+                    let value = self.env.get(param).unwrap();
+                    value.hash(&mut hasher);
+                }
+
+                let key = MemoKey {
+                    id,
+                    args_hash: hasher.finish(),
+                };
+
+                let value = self.stack.last().unwrap();
+                self.memos.insert(key, value.clone());
             }
             Instruction::Resume(id) => {
                 let value = self.stack.pop().ok_or(Error::EmptyStack)?;
@@ -425,6 +492,7 @@ impl Executor {
     pub fn execute(&mut self, value: Value) -> Result<Value, Error> {
         self.instructions.clear();
         self.stack.clear();
+        self.memos.clear();
 
         let future = self.eval(value);
         let mut main_future = pin!(future);

@@ -64,6 +64,12 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| misp.eval("(> 10 5)").unwrap());
     });
 
+    c.bench_function("interp runtime fibonacci", |b| {
+        misp.eval("(func fib (n) (if (<= n 1) n (+ (fib (- n 2)) (fib (- n 1)))))")
+            .unwrap();
+        b.iter(|| misp.eval("(fib 1000)").unwrap());
+    });
+
     c.bench_function("interp runtime factorial", |b| {
         misp.eval("(func factorialRuntime (n) (if (<= n 1) 1 (* n (factorialRuntime (- n 1)))))")
             .unwrap();

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use misp_num::{Sign, decimal::Decimal};
 
@@ -6,7 +6,7 @@ use crate::{Function, NativeMispFunction, Value};
 
 #[derive(Debug, Default, Clone)]
 pub struct Scope {
-    pub bindings: HashMap<String, Value>,
+    pub bindings: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone)]
