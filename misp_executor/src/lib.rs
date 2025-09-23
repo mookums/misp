@@ -1,6 +1,7 @@
 mod builtin;
 pub mod config;
 pub mod environment;
+pub mod future;
 
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -26,6 +27,7 @@ use crate::{
     },
     config::Config,
     environment::{Environment, Scope},
+    future::{EvalFuture, EvalFutureContext},
 };
 
 #[derive(Debug, Clone, Hash)]
@@ -89,38 +91,6 @@ pub enum Instruction {
     Marker(usize),
     MemoCheck { id: usize, params: Rc<Vec<String>> },
     MemoStore { id: usize, params: Rc<Vec<String>> },
-}
-
-#[derive(Debug, Default)]
-pub struct EvalFutureContext {
-    result: Option<Result<Value, Error>>,
-    waker: Option<Waker>,
-}
-
-pub struct EvalFuture {
-    id: usize,
-    executor: *mut Executor,
-}
-
-impl Future for EvalFuture {
-    type Output = Result<Value, Error>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        let fut = self.get_mut();
-        let executor = unsafe { &mut *fut.executor };
-
-        if let Some(future_data) = executor.futures.get_mut(&fut.id) {
-            if let Some(result) = future_data.result.take() {
-                executor.futures.remove(&fut.id);
-                Poll::Ready(result)
-            } else {
-                future_data.waker = Some(cx.waker().clone());
-                Poll::Pending
-            }
-        } else {
-            panic!("Future {} not found", fut.id)
-        }
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
