@@ -36,8 +36,8 @@ pub fn builtin_func(executor: *mut Executor) -> NativeMispFuture {
 
         let function = Value::Function(Function::Runtime(RuntimeMispFunction {
             id: function_id,
-            params,
-            body: Box::new(body),
+            params: params.into(),
+            body: body.into(),
         }));
 
         executor.env.set_global(name, function.clone());

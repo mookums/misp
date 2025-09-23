@@ -6,6 +6,7 @@ use std::{
     collections::{BTreeMap, VecDeque},
     hash::{DefaultHasher, Hash, Hasher},
     pin::{Pin, pin},
+    rc::Rc,
     task::{Context, Poll, Waker},
 };
 
@@ -39,8 +40,8 @@ type NativeMispFunction = fn(*mut Executor) -> NativeMispFuture;
 #[derive(Debug, Clone, Hash)]
 pub struct RuntimeMispFunction {
     pub id: usize,
-    pub params: Vec<String>,
-    pub body: Box<Value>,
+    pub params: Rc<Vec<String>>,
+    pub body: Rc<Value>,
 }
 
 #[derive(Debug, Clone, Hash)]
@@ -86,8 +87,8 @@ pub enum Instruction {
     Resume(usize),
     Await(usize),
     Marker(usize),
-    MemoCheck { id: usize, params: Vec<String> },
-    MemoStore { id: usize, params: Vec<String> },
+    MemoCheck { id: usize, params: Rc<Vec<String>> },
+    MemoStore { id: usize, params: Rc<Vec<String>> },
 }
 
 #[derive(Debug, Default)]
@@ -291,9 +292,9 @@ impl Executor {
                 injector.inject(Instruction::PushScope);
 
                 // Reverse order ensures the correct value->name binding here.
-                for param in f.params.iter().cloned().rev() {
+                for param in f.params.iter().rev() {
                     Self::compile(self.stack.pop().unwrap(), &mut injector)?;
-                    injector.inject(Instruction::Store(param));
+                    injector.inject(Instruction::Store(param.clone()));
                 }
 
                 injector.inject(Instruction::MemoCheck {
@@ -301,7 +302,8 @@ impl Executor {
                     params: f.params.clone(),
                 });
 
-                Self::compile(*f.body, &mut injector)?;
+                let body = (*f.body).clone();
+                Self::compile(body, &mut injector)?;
 
                 injector.inject(Instruction::MemoStore {
                     id: f.id,
@@ -380,7 +382,7 @@ impl Executor {
             Instruction::Marker(_) => {}
             Instruction::MemoCheck { id, params } => {
                 let mut hasher = DefaultHasher::default();
-                for param in params.into_iter() {
+                for param in params.iter() {
                     let value = self.env.get(param).unwrap();
                     value.hash(&mut hasher);
                 }
@@ -403,7 +405,7 @@ impl Executor {
             }
             Instruction::MemoStore { id, params } => {
                 let mut hasher = DefaultHasher::default();
-                for param in params.into_iter() {
+                for param in params.iter() {
                     let value = self.env.get(param).unwrap();
                     value.hash(&mut hasher);
                 }
