@@ -3,40 +3,56 @@ use misp_num::{Sign, decimal::Decimal};
 use crate::{Error, Executor, NativeMispFuture, Value, arity_check};
 use futures::join;
 
+const MAX_VARIADIC_ARGS: usize = 16;
+
 macro_rules! binary_op {
     ($name:ident, $op:tt) => {
         pub fn $name(executor_ptr: *mut Executor) -> NativeMispFuture {
             Box::pin(async move {
                 let executor = unsafe { &mut *executor_ptr };
+                let mut values: [Decimal; MAX_VARIADIC_ARGS] = [const { Decimal::ZERO } ; MAX_VARIADIC_ARGS];
 
                 let Value::Decimal(arg_count) = executor.stack.pop().ok_or(Error::EmptyStack)?
                 else {
                     return Err(Error::InvalidType);
                 };
 
-                let count = arg_count.to_u128() as usize;
-                if count == 0 {
+                let arity = arg_count.to_u128() as usize;
+                if arity == 0 {
                     return Err(Error::InvalidType);
                 }
 
-                let mut thunks = Vec::with_capacity(count);
-                for _ in 0..count {
-                    thunks.push(executor.stack.pop().ok_or(Error::EmptyStack)?);
-                }
+                let values = &mut values[..arity];
+                // for i in 0..arity {
+                //     let thunk = executor.stack.pop().unwrap();
+                //     values[i] = match thunk {
+                //         Value::Decimal(val) => val,
+                //         other => {
+                //             let Value::Decimal(val) = executor.eval(other).await? else {
+                //                 return Err(Error::InvalidType);
+                //             };
+                //             val
+                //         }
+                //     };
+                // }
 
-                let mut values = Vec::with_capacity(count);
-                for thunk in thunks.into_iter().rev() {
-                    let Value::Decimal(val) = executor.eval(thunk).await? else {
-                        return Err(Error::InvalidType);
+                for value in values.iter_mut() {
+                    let thunk = executor.stack.pop().unwrap();
+                    *value = match thunk {
+                        Value::Decimal(val) => val,
+                        other => {
+                            let Value::Decimal(val) = executor.eval(other).await? else {
+                                return Err(Error::InvalidType);
+                            };
+                            val
+                        }
                     };
-                    values.push(val);
                 }
 
                 let mut acc = values[0];
-                for val in &values[1..] {
+                for val in &values[1..arity] {
                     acc = Decimal::from(acc $op *val);
                 }
-
                 Ok(Value::Decimal(acc))
             })
         }
@@ -61,8 +77,13 @@ macro_rules! binary_comparison_op {
                 for _ in 0..count {
                     let thunk = executor.stack.pop().ok_or(Error::EmptyStack)?;
 
-                    let Value::Decimal(value) = executor.eval(thunk).await? else {
-                        return Err(Error::InvalidType);
+                    let value = if let Value::Decimal(val) = thunk {
+                        val
+                    } else {
+                        let Value::Decimal(val) = executor.eval(thunk).await? else {
+                            return Err(Error::InvalidType);
+                        };
+                        val
                     };
 
                     if let Some(prev_value) = prev && Decimal::from(value $op prev_value) != Decimal::ONE {
