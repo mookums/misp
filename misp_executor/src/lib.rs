@@ -14,11 +14,11 @@ use misp_parser::SExpr;
 use crate::{
     builtin::{
         control::builtin_if,
-        func::builtin_func,
+        func::{builtin_func, builtin_lambda},
         math::{
             builtin_add, builtin_divide, builtin_equal, builtin_factorial, builtin_gt, builtin_gte,
             builtin_lt, builtin_lte, builtin_minus, builtin_multiply, builtin_not_equal,
-            builtin_pow, builtin_sqrt,
+            builtin_pow, builtin_sqrt, builtin_summate,
         },
     },
     config::Config,
@@ -71,7 +71,7 @@ pub enum Instruction {
     Push(Value),
     Store(String),
     Load(String),
-    Call,
+    Call(usize),
     PushScope,
     PushDefinedScope(Scope),
     PopScope,
@@ -169,11 +169,11 @@ impl Default for Executor {
 
         env.push_scope();
         env.set_prev(Value::Decimal(Decimal::ZERO));
-        env.set("pi", Value::Decimal(Decimal::PI));
-        env.set("e", Value::Decimal(Decimal::E));
+
+        env.load_constants();
 
         env.define_native_function("func", builtin_func);
-        // env.define_native_function("lambda", builtin_lambda);
+        env.define_native_function("lambda", builtin_lambda);
 
         // Control Flow Functions
         env.define_native_function("if", builtin_if);
@@ -193,7 +193,7 @@ impl Default for Executor {
         env.define_native_function(">=", builtin_gte);
         env.define_native_function("pow", builtin_pow);
         env.define_native_function("sqrt", builtin_sqrt);
-        // env.define_native_function("summate", builtin_summate);
+        env.define_native_function("summate", builtin_summate);
         env.define_native_function("factorial", builtin_factorial);
 
         // Trig Functions
@@ -218,13 +218,15 @@ impl Default for Executor {
 }
 
 impl Executor {
-    pub fn inject_compiled(value: Value, injector: &mut Injector) -> Result<(), Error> {
+    pub fn compile(value: Value, injector: &mut Injector) -> Result<(), Error> {
         match value {
             Value::Atom(atom) => injector.inject(Instruction::Load(atom)),
             Value::Decimal(_) | Value::Function(_) => {
                 injector.inject(Instruction::Push(value));
             }
             Value::List(mut values) => {
+                let arity = values.len() - 1;
+
                 let mut drain = values.drain(0..values.len());
                 let Value::Atom(name) = drain.next().unwrap() else {
                     return Err(Error::InvalidType);
@@ -235,14 +237,14 @@ impl Executor {
                 }
 
                 injector.inject(Instruction::Load(name));
-                injector.inject(Instruction::Call);
+                injector.inject(Instruction::Call(arity));
             }
         }
 
         Ok(())
     }
 
-    pub fn inject_function(&mut self, function: Function) -> Result<(), Error> {
+    pub fn compile_function(&mut self, function: Function) -> Result<(), Error> {
         match function {
             Function::Native(f) => {
                 let native_future = f(self);
@@ -256,24 +258,27 @@ impl Executor {
                 injector.inject(Instruction::Await(future_id));
             }
             Function::Runtime(f) => {
+                arity_check!(self, "<func>", f.params.len());
+
                 let mut injector = Injector {
                     instructions: &mut self.instructions,
                     index: 0,
                 };
 
-                // injector.inject(Instruction::PushScope);
+                injector.inject(Instruction::PushScope);
 
                 // Reverse order ensures the correct value->name binding here.
                 for param in f.params.into_iter().rev() {
-                    Self::inject_compiled(self.stack.pop().unwrap(), &mut injector)?;
-                    // injector.inject(Instruction::Push(self.stack.pop().unwrap()));
+                    Self::compile(self.stack.pop().unwrap(), &mut injector)?;
                     injector.inject(Instruction::Store(param));
                 }
 
-                Self::inject_compiled(*f.body, &mut injector)?;
-                // injector.inject(Instruction::PopScope);
+                Self::compile(*f.body, &mut injector)?;
+                injector.inject(Instruction::PopScope);
             }
             Function::Lambda(l) => {
+                arity_check!(self, "<lambda>", l.params.len());
+
                 let mut injector = Injector {
                     instructions: &mut self.instructions,
                     index: 0,
@@ -283,12 +288,11 @@ impl Executor {
 
                 // Reverse order ensures the correct value->name binding here.
                 for param in l.params.into_iter().rev() {
-                    Self::inject_compiled(self.stack.pop().unwrap(), &mut injector)?;
-                    // injector.inject(Instruction::Push(self.stack.pop().unwrap()));
+                    Self::compile(self.stack.pop().unwrap(), &mut injector)?;
                     injector.inject(Instruction::Store(param));
                 }
 
-                Self::inject_compiled(*l.body, &mut injector)?;
+                Self::compile(*l.body, &mut injector)?;
                 injector.inject(Instruction::PopScope);
             }
         }
@@ -316,12 +320,14 @@ impl Executor {
                 let value = self.env.get(&name).ok_or(Error::UnknownSymbol(name))?;
                 self.stack.push(value.clone());
             }
-            Instruction::Call => {
+            Instruction::Call(arity) => {
                 let func = self.stack.pop().unwrap();
 
                 match func {
                     Value::Function(f) => {
-                        self.inject_function(f)?;
+                        let arity_decimal = Decimal::from(arity as u64);
+                        self.stack.push(Value::Decimal(arity_decimal));
+                        self.compile_function(f)?;
                     }
                     _ => return Err(Error::FunctionNotFound),
                 }
@@ -356,7 +362,7 @@ impl Executor {
 
                 match future.as_mut().poll(&mut context) {
                     Poll::Ready(result) => {
-                        self.stack.push(result.unwrap());
+                        self.stack.push(result?);
                         self.native_futures.remove(&id);
                     }
                     Poll::Pending => {
@@ -369,16 +375,36 @@ impl Executor {
         Ok(())
     }
 
+    async fn run_function(&mut self, func: Function, args: Vec<Value>) -> Result<Value, Error> {
+        let future_id = self.next_future_id;
+        self.next_future_id += 1;
+
+        let mut injector = Injector::new(&mut self.instructions);
+        let arity = args.len();
+        for arg in args {
+            injector.inject(Instruction::Push(arg));
+        }
+
+        injector.inject(Instruction::Push(Value::Function(func)));
+        injector.inject(Instruction::Call(arity));
+        injector.inject(Instruction::Resume(future_id));
+
+        self.futures.insert(future_id, EvalFutureContext::default());
+
+        EvalFuture {
+            id: future_id,
+            executor: self as *mut Executor,
+        }
+        .await
+    }
+
     pub fn eval(&mut self, expr: Value) -> EvalFuture {
         let future_id = self.next_future_id;
         self.next_future_id += 1;
 
         let mut injector = Injector::new(&mut self.instructions);
-
-        injector.inject(Instruction::PushScope);
-        Self::inject_compiled(expr, &mut injector).unwrap();
+        Self::compile(expr, &mut injector).unwrap();
         injector.inject(Instruction::Resume(future_id));
-        injector.inject(Instruction::PopScope);
 
         self.futures.insert(future_id, EvalFutureContext::default());
 
@@ -397,12 +423,16 @@ impl Executor {
         let mut context = Context::from_waker(self.waker);
 
         loop {
-            if let Some(instruction) = self.instructions.pop_front() {
+            while let Some(instruction) = self.instructions.pop_front() {
                 self.execute_instruction(instruction)?;
             }
 
             match main_future.as_mut().poll(&mut context) {
-                Poll::Ready(result) => return result,
+                Poll::Ready(result) => {
+                    let result = result?;
+                    self.env.set_prev(result.clone());
+                    return Ok(result);
+                }
                 Poll::Pending => continue,
             }
         }

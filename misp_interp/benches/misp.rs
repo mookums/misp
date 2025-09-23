@@ -25,10 +25,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     c.bench_function("interp deep nesting", |b| {
-        b.iter(|| {
-            misp.eval("(+ (+ (+ 1 2) (+ 3 4)) (+ (+ 5 6) (+ 7 8)))")
-                .unwrap()
-        });
+        b.iter(|| misp.eval("(+ 1 2 3 4 5 6 7 8)").unwrap());
     });
 
     c.bench_function("interp sqrt operation", |b| {
@@ -60,7 +57,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     c.bench_function("interp pi constant", |b| {
-        b.iter(|| misp.eval("pi").unwrap());
+        b.iter(|| misp.eval("math::pi").unwrap());
     });
 
     c.bench_function("interp comparison", |b| {

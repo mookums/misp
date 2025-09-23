@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+futures = "0.3.31"
+
 misp_parser = { path = "../misp_parser" }
 misp_num = { path = "../misp_num" }
-
 thiserror.workspace = true

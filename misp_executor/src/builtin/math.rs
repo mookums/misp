@@ -1,38 +1,93 @@
 use misp_num::decimal::Decimal;
 
-use crate::{Error, Executor, NativeMispFuture, Value};
+use crate::{Error, Executor, NativeMispFuture, Value, arity_check};
+use futures::join;
 
 macro_rules! binary_op {
-    ($name:ident, $op_name:literal, $op:tt) => {
+    ($name:ident, $op:tt) => {
         pub fn $name(executor_ptr: *mut Executor) -> NativeMispFuture {
             Box::pin(async move {
-                let executor = unsafe {& mut *executor_ptr };
+                let executor = unsafe { &mut *executor_ptr };
 
-                let (right_thunk, left_thunk) = (
-                    executor.stack.pop().unwrap(),
-                    executor.stack.pop().unwrap(),
-                );
-
-                let (Value::Decimal(left), Value::Decimal(right)) = (executor.eval(left_thunk).await?, executor.eval(right_thunk).await?) else {
-                    panic!()
+                let Value::Decimal(arg_count) = executor.stack.pop().ok_or(Error::EmptyStack)?
+                else {
+                    return Err(Error::InvalidType);
                 };
 
-                Ok(Value::Decimal(Decimal::from(left $op right)))
+                let count = arg_count.to_u128() as usize;
+                if count == 0 {
+                    return Err(Error::InvalidType);
+                }
+
+                let mut thunks = Vec::with_capacity(count);
+                for _ in 0..count {
+                    thunks.push(executor.stack.pop().ok_or(Error::EmptyStack)?);
+                }
+
+                let mut values = Vec::with_capacity(count);
+                for thunk in thunks.into_iter().rev() {
+                    let Value::Decimal(val) = executor.eval(thunk).await? else {
+                        return Err(Error::InvalidType);
+                    };
+                    values.push(val);
+                }
+
+                let mut acc = values[0];
+                for val in &values[1..] {
+                    acc = Decimal::from(acc $op *val);
+                }
+
+                Ok(Value::Decimal(acc))
             })
         }
     };
 }
 
-binary_op!(builtin_add, "+", +);
-binary_op!(builtin_minus, "-",-);
-binary_op!(builtin_multiply, "*", *);
-binary_op!(builtin_divide, "/", /);
-binary_op!(builtin_equal, "==", ==);
-binary_op!(builtin_not_equal, "!=", !=);
-binary_op!(builtin_lt, "<", <);
-binary_op!(builtin_lte, "<=", <=);
-binary_op!(builtin_gt, ">", >);
-binary_op!(builtin_gte, ">=", >=);
+macro_rules! binary_comparison_op {
+    ($name:ident, $op:tt) => {
+        pub fn $name(executor_ptr: *mut Executor) -> NativeMispFuture {
+            Box::pin(async move {
+                let executor = unsafe { &mut *executor_ptr };
+
+                let Value::Decimal(arg_count) = executor.stack.pop().ok_or(Error::EmptyStack)?
+                else {
+                    return Err(Error::InvalidType);
+                };
+
+                let count = arg_count.to_u128() as usize;
+
+                let mut prev = None;
+
+                for _ in 0..count {
+                    let thunk = executor.stack.pop().ok_or(Error::EmptyStack)?;
+
+                    let Value::Decimal(value) = executor.eval(thunk).await? else {
+                        return Err(Error::InvalidType);
+                    };
+
+                    if let Some(prev_value) = prev && Decimal::from(value $op prev_value) != Decimal::ONE {
+                            return Ok(Value::Decimal(Decimal::ZERO))
+                    }
+
+                    prev = Some(value)
+                }
+
+                Ok(Value::Decimal(Decimal::ONE))
+            })
+        }
+    };
+}
+
+binary_op!(builtin_add, +);
+binary_op!(builtin_minus,-);
+binary_op!(builtin_multiply, *);
+binary_op!(builtin_divide, /);
+binary_comparison_op!(builtin_equal, ==);
+binary_comparison_op!(builtin_not_equal, !=);
+binary_comparison_op!(builtin_lt, <);
+binary_comparison_op!(builtin_lte, <=);
+binary_comparison_op!(builtin_gt, >);
+binary_comparison_op!(builtin_gte, >=);
 
 // pub fn builtin_mod(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
 //     if args.len() != 2 {
@@ -102,15 +157,13 @@ binary_op!(builtin_gte, ">=", >=);
 pub fn builtin_sqrt(executor: *mut Executor) -> NativeMispFuture {
     Box::pin(async move {
         let executor = unsafe { &mut *executor };
-        let value = executor.stack.pop().ok_or(Error::EmptyStack)?;
+        arity_check!(executor, "sqrt", 1);
 
-        eprintln!("Before Evaluating Sqrt Value");
+        let value = executor.stack.pop().ok_or(Error::EmptyStack)?;
 
         let Value::Decimal(evaluated) = executor.eval(value).await? else {
             return Err(Error::InvalidType);
         };
-
-        eprintln!("After Evaluating Sqrt Value: {evaluated:?}");
 
         Ok(Value::Decimal(evaluated.sqrt()))
     })
@@ -119,16 +172,16 @@ pub fn builtin_sqrt(executor: *mut Executor) -> NativeMispFuture {
 pub fn builtin_pow(executor: *mut Executor) -> NativeMispFuture {
     Box::pin(async move {
         let executor = unsafe { &mut *executor };
+        arity_check!(executor, "pow", 2);
 
         let (pow_thunk, base_thunk) = (
             executor.stack.pop().ok_or(Error::EmptyStack)?,
             executor.stack.pop().ok_or(Error::EmptyStack)?,
         );
 
-        let (Value::Decimal(pow), Value::Decimal(base)) = (
-            executor.eval(pow_thunk).await?,
-            executor.eval(base_thunk).await?,
-        ) else {
+        let (pow, base) = join!(executor.eval(pow_thunk), executor.eval(base_thunk));
+
+        let (Value::Decimal(pow), Value::Decimal(base)) = (pow?, base?) else {
             return Err(Error::InvalidType);
         };
 
@@ -136,46 +189,55 @@ pub fn builtin_pow(executor: *mut Executor) -> NativeMispFuture {
     })
 }
 
-// pub fn builtin_summate(executor: &mut Executor) -> Result<Value, Error> {
-//     let (func, end, start) = (
-//         executor.stack.pop().ok_or(Error::EmptyStack)?,
-//         executor.stack.pop().ok_or(Error::EmptyStack)?,
-//         executor.stack.pop().ok_or(Error::EmptyStack)?,
-//     );
+pub fn builtin_summate(executor: *mut Executor) -> NativeMispFuture {
+    Box::pin(async move {
+        let executor = unsafe { &mut *executor };
+        arity_check!(executor, "summate", 3);
 
-//     let Value::Decimal(start) = executor.eval(start)? else {
-//         return Err(Error::InvalidType);
-//     };
+        let (func, end, start) = (
+            executor.stack.pop().ok_or(Error::EmptyStack)?,
+            executor.stack.pop().ok_or(Error::EmptyStack)?,
+            executor.stack.pop().ok_or(Error::EmptyStack)?,
+        );
 
-//     let Value::Decimal(end) = executor.eval(end)? else {
-//         return Err(Error::InvalidType);
-//     };
+        let (start, end, func) = join!(
+            executor.eval(start),
+            executor.eval(end),
+            executor.eval(func),
+        );
 
-//     let Value::Function(f) = executor.eval(func)? else {
-//         return Err(Error::InvalidType);
-//     };
+        let (Value::Decimal(start), Value::Decimal(end), Value::Function(f)) =
+            (start?, end?, func?)
+        else {
+            return Err(Error::InvalidType);
+        };
 
-//     let mut start = start.to_u128() as u64;
-//     let end = end.to_u128() as u64;
-//     let mut sum = Decimal::ZERO;
+        let mut start = start.to_u128() as u64;
+        let end = end.to_u128() as u64;
+        let mut sum = Decimal::ZERO;
 
-//     while start <= end {
-//         let current_decimal = Value::Decimal(Decimal::from(start));
-//         let result = executor.eval_function(f.clone(), vec![current_decimal])?;
-//         let Value::Decimal(result_decimal) = result else {
-//             return Err(Error::InvalidType);
-//         };
+        while start <= end {
+            let current_decimal = Value::Decimal(Decimal::from(start));
+            let result = executor
+                .run_function(f.clone(), vec![current_decimal])
+                .await?;
+            let Value::Decimal(result_decimal) = result else {
+                return Err(Error::InvalidType);
+            };
 
-//         sum += result_decimal;
-//         start += 1;
-//     }
+            sum += result_decimal;
+            start += 1;
+        }
 
-//     Ok(Value::Decimal(sum))
-// }
+        Ok(Value::Decimal(sum))
+    })
+}
 
 pub fn builtin_factorial(executor: *mut Executor) -> NativeMispFuture {
     Box::pin(async move {
         let executor = unsafe { &mut *executor };
+        arity_check!(executor, "factorial", 1);
+
         let value = executor.stack.pop().ok_or(Error::EmptyStack)?;
 
         let Value::Decimal(n) = executor.eval(value).await? else {

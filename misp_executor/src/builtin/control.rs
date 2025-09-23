@@ -1,10 +1,11 @@
 use misp_num::decimal::Decimal;
 
-use crate::{Error, Executor, NativeMispFuture, Value};
+use crate::{Error, Executor, NativeMispFuture, Value, arity_check};
 
 pub fn builtin_if(executor: *mut Executor) -> NativeMispFuture {
     Box::pin(async move {
         let executor = unsafe { &mut *executor };
+        arity_check!(executor, "if", 3);
 
         let (else_thunk, then_thunk, condition_thunk) = (
             executor.stack.pop().ok_or(Error::EmptyStack)?,

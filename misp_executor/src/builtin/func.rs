@@ -1,8 +1,11 @@
-use crate::{Error, Executor, Function, Lambda, NativeMispFuture, RuntimeMispFunction, Value};
+use crate::{
+    Error, Executor, Function, Lambda, NativeMispFuture, RuntimeMispFunction, Value, arity_check,
+};
 
 pub fn builtin_func(executor: *mut Executor) -> NativeMispFuture {
     Box::pin(async move {
         let executor = unsafe { &mut *executor };
+        arity_check!(executor, "func", 3);
 
         let (body, params_thunk, name) = (
             executor.stack.pop().ok_or(Error::EmptyStack)?,
@@ -33,36 +36,41 @@ pub fn builtin_func(executor: *mut Executor) -> NativeMispFuture {
             body: Box::new(body),
         }));
 
-        executor.env.set(name, function.clone());
+        executor.env.set_global(name, function.clone());
         Ok(function)
     })
 }
 
-// pub fn builtin_lambda(executor: &mut Executor) -> Result<Value, Error> {
-//     let (body, params_thunk) = (
-//         executor.stack.pop().ok_or(Error::EmptyStack)?,
-//         executor.stack.pop().ok_or(Error::EmptyStack)?,
-//     );
+pub fn builtin_lambda(executor: *mut Executor) -> NativeMispFuture {
+    Box::pin(async move {
+        let executor = unsafe { &mut *executor };
+        arity_check!(executor, "lamdba", 2);
 
-//     let params = match params_thunk {
-//         Value::List(param_list) => {
-//             let mut params = Vec::new();
-//             for param in param_list {
-//                 match param {
-//                     Value::Atom(p) => params.push(p.clone()),
-//                     _ => return Err(Error::FunctionCall),
-//                 }
-//             }
-//             params
-//         }
-//         _ => return Err(Error::FunctionCall),
-//     };
+        let (body, params_thunk) = (
+            executor.stack.pop().ok_or(Error::EmptyStack)?,
+            executor.stack.pop().ok_or(Error::EmptyStack)?,
+        );
 
-//     let lambda = Value::Function(Function::Lambda(Lambda {
-//         params,
-//         body: Box::new(body),
-//         scope: executor.env.current_scope().clone(),
-//     }));
+        let params = match params_thunk {
+            Value::List(param_list) => {
+                let mut params = Vec::new();
+                for param in param_list {
+                    match param {
+                        Value::Atom(p) => params.push(p),
+                        _ => return Err(Error::FunctionCall),
+                    }
+                }
+                params
+            }
+            _ => return Err(Error::FunctionCall),
+        };
 
-//     Ok(lambda)
-// }
+        let lambda = Value::Function(Function::Lambda(Lambda {
+            params,
+            body: Box::new(body),
+            scope: executor.env.current_scope().clone(),
+        }));
+
+        Ok(lambda)
+    })
+}

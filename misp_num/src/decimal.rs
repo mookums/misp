@@ -14,7 +14,7 @@ pub struct Decimal {
 }
 
 impl Decimal {
-    pub const MAX_PRECISION: i32 = 18;
+    pub const MAX_PRECISION: i32 = 19;
 
     pub const ZERO: Decimal = Decimal {
         value: 0,
@@ -30,13 +30,13 @@ impl Decimal {
 
     pub const PI: Decimal = Decimal {
         value: 3141592653589793238,
-        scale: Decimal::MAX_PRECISION,
+        scale: 18,
         sign: Sign::Positive,
     };
 
     pub const E: Decimal = Decimal {
         value: 2718281828459045235,
-        scale: Decimal::MAX_PRECISION,
+        scale: 18,
         sign: Sign::Positive,
     };
 
