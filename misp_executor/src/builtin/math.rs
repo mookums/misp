@@ -1,4 +1,4 @@
-use misp_num::decimal::Decimal;
+use misp_num::{Sign, decimal::Decimal};
 
 use crate::{Error, Executor, NativeMispFuture, Value, arity_check};
 use futures::join;
@@ -154,6 +154,84 @@ binary_comparison_op!(builtin_gte, >=);
 //     Ok(Value::Decimal(evaluated.sqrt()))
 // }
 
+pub fn builtin_abs(executor: *mut Executor) -> NativeMispFuture {
+    Box::pin(async move {
+        let executor = unsafe { &mut *executor };
+        arity_check!(executor, "abs", 1);
+
+        let value = executor.stack.pop().ok_or(Error::EmptyStack)?;
+
+        let Value::Decimal(mut evaluated) = executor.eval(value).await? else {
+            return Err(Error::InvalidType);
+        };
+
+        evaluated.sign = Sign::Positive;
+        Ok(Value::Decimal(evaluated))
+    })
+}
+
+pub fn builtin_min(executor: *mut Executor) -> NativeMispFuture {
+    Box::pin(async move {
+        let executor = unsafe { &mut *executor };
+
+        let Value::Decimal(arg_count) = executor.stack.pop().ok_or(Error::EmptyStack)? else {
+            return Err(Error::InvalidType);
+        };
+
+        let count = arg_count.to_u128() as usize;
+        if count == 0 {
+            return Err(Error::InvalidType);
+        }
+
+        let mut thunks = Vec::with_capacity(count);
+        for _ in 0..count {
+            thunks.push(executor.stack.pop().ok_or(Error::EmptyStack)?);
+        }
+
+        let mut values = Vec::with_capacity(count);
+        for thunk in thunks.into_iter().rev() {
+            let Value::Decimal(val) = executor.eval(thunk).await? else {
+                return Err(Error::InvalidType);
+            };
+            values.push(val);
+        }
+
+        let min = values.into_iter().reduce(|acc, x| acc.min(x)).unwrap();
+        Ok(Value::Decimal(min))
+    })
+}
+
+pub fn builtin_max(executor: *mut Executor) -> NativeMispFuture {
+    Box::pin(async move {
+        let executor = unsafe { &mut *executor };
+
+        let Value::Decimal(arg_count) = executor.stack.pop().ok_or(Error::EmptyStack)? else {
+            return Err(Error::InvalidType);
+        };
+
+        let count = arg_count.to_u128() as usize;
+        if count == 0 {
+            return Err(Error::InvalidType);
+        }
+
+        let mut thunks = Vec::with_capacity(count);
+        for _ in 0..count {
+            thunks.push(executor.stack.pop().ok_or(Error::EmptyStack)?);
+        }
+
+        let mut values = Vec::with_capacity(count);
+        for thunk in thunks.into_iter().rev() {
+            let Value::Decimal(val) = executor.eval(thunk).await? else {
+                return Err(Error::InvalidType);
+            };
+            values.push(val);
+        }
+
+        let max = values.into_iter().reduce(|acc, x| acc.max(x)).unwrap();
+        Ok(Value::Decimal(max))
+    })
+}
+
 pub fn builtin_sqrt(executor: *mut Executor) -> NativeMispFuture {
     Box::pin(async move {
         let executor = unsafe { &mut *executor };
@@ -230,27 +308,5 @@ pub fn builtin_summate(executor: *mut Executor) -> NativeMispFuture {
         }
 
         Ok(Value::Decimal(sum))
-    })
-}
-
-pub fn builtin_factorial(executor: *mut Executor) -> NativeMispFuture {
-    Box::pin(async move {
-        let executor = unsafe { &mut *executor };
-        arity_check!(executor, "factorial", 1);
-
-        let value = executor.stack.pop().ok_or(Error::EmptyStack)?;
-
-        let Value::Decimal(n) = executor.eval(value).await? else {
-            return Err(Error::InvalidType);
-        };
-
-        let n_int = n.to_u128() as u64;
-
-        let mut result = Decimal::ONE;
-        for i in 1..=n_int {
-            result *= Decimal::from(i);
-        }
-
-        Ok(Value::Decimal(result))
     })
 }

@@ -13,12 +13,13 @@ use misp_parser::SExpr;
 
 use crate::{
     builtin::{
+        combinatorics::{builtin_combinations, builtin_factorial, builtin_permutations},
         control::builtin_if,
         func::{builtin_func, builtin_lambda},
         math::{
-            builtin_add, builtin_divide, builtin_equal, builtin_factorial, builtin_gt, builtin_gte,
-            builtin_lt, builtin_lte, builtin_minus, builtin_multiply, builtin_not_equal,
-            builtin_pow, builtin_sqrt, builtin_summate,
+            builtin_abs, builtin_add, builtin_divide, builtin_equal, builtin_gt, builtin_gte,
+            builtin_lt, builtin_lte, builtin_max, builtin_min, builtin_minus, builtin_multiply,
+            builtin_not_equal, builtin_pow, builtin_sqrt, builtin_summate,
         },
     },
     config::Config,
@@ -172,12 +173,12 @@ impl Default for Executor {
 
         env.load_constants();
 
+        // Functions
         env.define_native_function("func", builtin_func);
         env.define_native_function("lambda", builtin_lambda);
 
-        // Control Flow Functions
+        // Control Functions
         env.define_native_function("if", builtin_if);
-        // env.define_native_function("let", builtin_let);
 
         // Math Functions
         env.define_native_function("+", builtin_add);
@@ -191,10 +192,17 @@ impl Default for Executor {
         env.define_native_function("<=", builtin_lte);
         env.define_native_function(">", builtin_gt);
         env.define_native_function(">=", builtin_gte);
+        env.define_native_function("abs", builtin_abs);
+        env.define_native_function("min", builtin_min);
+        env.define_native_function("max", builtin_max);
         env.define_native_function("pow", builtin_pow);
         env.define_native_function("sqrt", builtin_sqrt);
         env.define_native_function("summate", builtin_summate);
+
+        // Combinatorics
         env.define_native_function("factorial", builtin_factorial);
+        env.define_native_function("combinations", builtin_combinations);
+        env.define_native_function("permutations", builtin_permutations);
 
         // Trig Functions
         // env.define_native_function("sin", builtin_sin);

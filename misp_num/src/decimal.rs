@@ -6,11 +6,11 @@ use std::{
 
 use crate::Sign;
 
-#[derive(Debug, Clone, Copy, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub struct Decimal {
     value: u64,
     scale: i32,
-    sign: Sign,
+    pub sign: Sign,
 }
 
 impl Decimal {
@@ -337,6 +337,18 @@ impl Decimal {
             format!("{}{mantissa} * 10^{exponent}", self.sign)
         }
     }
+
+    pub fn factorial(self) -> Decimal {
+        debug_assert!(self.is_integer());
+
+        let int = self.to_u128() as u64;
+        let mut result = Decimal::ONE;
+        for i in 1..=int {
+            result *= Self::from(i);
+        }
+
+        result
+    }
 }
 
 impl PartialEq for Decimal {
@@ -348,22 +360,30 @@ impl PartialEq for Decimal {
     }
 }
 
+impl Eq for Decimal {}
+
 impl PartialOrd for Decimal {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Decimal {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         let (self_normal, other_normal) = (self.normalize(), other.normalize());
 
         match (self_normal.sign, other_normal.sign) {
-            (Sign::Positive, Sign::Negative) => Some(std::cmp::Ordering::Greater),
-            (Sign::Negative, Sign::Positive) => Some(std::cmp::Ordering::Less),
+            (Sign::Positive, Sign::Negative) => std::cmp::Ordering::Greater,
+            (Sign::Negative, Sign::Positive) => std::cmp::Ordering::Less,
             (Sign::Positive, Sign::Positive) => {
                 let (self_aligned, other_aligned) =
                     Decimal::align_scales(self_normal, other_normal);
-                Some(self_aligned.value.cmp(&other_aligned.value))
+                self_aligned.value.cmp(&other_aligned.value)
             }
             (Sign::Negative, Sign::Negative) => {
                 let (self_aligned, other_aligned) =
                     Decimal::align_scales(self_normal, other_normal);
-                Some(other_aligned.value.cmp(&self_aligned.value))
+                other_aligned.value.cmp(&self_aligned.value)
             }
         }
     }
