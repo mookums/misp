@@ -1,13 +1,17 @@
 [workspace]
 resolver = "2"
 members = [
-    "misp_cli",
     "misp_num",
-    "misp_executor",
+    "misp_common",
+    "misp_interner",
     "misp_lexer",
-    "misp_parser"
-, "misp_interp"]
+    "misp_parser",
+    "misp_executor",
+    "misp_interp",
+    "misp_cli"
+]
 
 [workspace.dependencies]
 thiserror = "2.0.12"
 criterion = "0.7.0"
+heapless = { version = "0.9.1", features = [ "portable-atomic" ] }

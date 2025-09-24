@@ -1,32 +1,43 @@
-use misp_num::decimal::Decimal;
+#![no_std]
+
+use core::str::FromStr;
+
+use misp_common::token::Token;
+use misp_interner::Interner;
 use thiserror::Error;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Token {
-    LeftParen,
-    RightParen,
-    Ident(String),
-
-    Decimal(Decimal),
-}
+use heapless::{String, Vec};
 
 #[derive(Debug, Error)]
-pub enum Error {
+pub enum Error<const MAX_STR: usize, const MAX_TOKENS: usize> {
     #[error("Unrecognized Token: ({value:?}) at ({line:?}, {column:?})")]
     UnrecognizedToken {
-        value: String,
+        value: String<MAX_STR>,
         line: usize,
         column: usize,
     },
+    #[error("String too long, passed limit of {MAX_STR}")]
+    StringTooLong,
+    #[error("Too many tokens, passed limit of {MAX_TOKENS}")]
+    TooManyTokens,
+    #[error("Interner: {0}")]
+    Interner(#[from] misp_interner::Error),
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct Lexer {
+pub struct Lexer<
+    const MAX_STR: usize,
+    const MAX_TOKENS: usize,
+    const MAX_LIST: usize,
+    const MAX_INTERN: usize,
+> {
     line: usize,
     column: usize,
 }
 
-impl Lexer {
+impl<const MAX_STR: usize, const MAX_TOKENS: usize, const MAX_LIST: usize, const MAX_INTERN: usize>
+    Lexer<MAX_STR, MAX_TOKENS, MAX_LIST, MAX_INTERN>
+{
     fn skip_whitespace<'a>(&mut self, rest: &'a str) -> &'a str {
         let mut remaining = rest;
 
@@ -45,7 +56,7 @@ impl Lexer {
         remaining
     }
 
-    fn single_token<'a>(&mut self, rest: &'a str) -> Option<(&'a str, Token)> {
+    fn single_token<'a>(&mut self, rest: &'a str) -> Option<(&'a str, Token<MAX_STR>)> {
         let char = rest.chars().next()?;
         let remaining = &rest[char.len_utf8()..];
 
@@ -60,7 +71,7 @@ impl Lexer {
         Some((remaining, token))
     }
 
-    fn literal_token<'a>(&mut self, rest: &'a str) -> Option<(&'a str, Token)> {
+    fn literal_token<'a>(&mut self, rest: &'a str) -> Option<(&'a str, Token<MAX_STR>)> {
         let chars = rest.char_indices();
         let mut end_pos = rest.len();
 
@@ -91,7 +102,11 @@ impl Lexer {
         Some((remaining, token))
     }
 
-    fn ident_token<'a>(&mut self, rest: &'a str) -> Option<(&'a str, Token)> {
+    fn ident_token<'a>(
+        &mut self,
+        rest: &'a str,
+        interner: &mut Interner<MAX_STR, MAX_LIST, MAX_INTERN>,
+    ) -> Result<Option<(&'a str, Token<MAX_STR>)>, Error<MAX_STR, MAX_TOKENS>> {
         let chars = rest.char_indices();
         let mut end_pos = 0;
 
@@ -104,27 +119,31 @@ impl Lexer {
         }
 
         if end_pos == 0 {
-            return None;
+            return Ok(None);
         }
 
         let token_str = &rest[..end_pos];
         let remaining = &rest[end_pos..];
 
+        let id = interner.intern_string(token_str)?;
         self.column += token_str.chars().count();
-
-        Some((remaining, Token::Ident(token_str.to_string())))
+        Ok(Some((remaining, Token::Ident(id))))
     }
 
-    fn token<'a>(&mut self, rest: &'a str) -> Option<(&'a str, Token)> {
+    fn token<'a>(
+        &mut self,
+        rest: &'a str,
+        interner: &mut Interner<MAX_STR, MAX_LIST, MAX_INTERN>,
+    ) -> Result<Option<(&'a str, Token<MAX_STR>)>, Error<MAX_STR, MAX_TOKENS>> {
         if let Some(literal) = self.literal_token(rest) {
-            return Some(literal);
+            return Ok(Some(literal));
         }
 
         if let Some(pair) = self.single_token(rest) {
-            return Some(pair);
+            return Ok(Some(pair));
         }
 
-        self.ident_token(rest)
+        self.ident_token(rest, interner)
     }
 
     fn reset(&mut self) {
@@ -132,7 +151,11 @@ impl Lexer {
         self.column = 0;
     }
 
-    pub fn lex(&mut self, input: &str) -> Result<Vec<Token>, Error> {
+    pub fn lex(
+        &mut self,
+        input: &str,
+        interner: &mut Interner<MAX_STR, MAX_LIST, MAX_INTERN>,
+    ) -> Result<Vec<Token<MAX_STR>, MAX_TOKENS>, Error<MAX_STR, MAX_TOKENS>> {
         self.reset();
 
         let mut tokens = Vec::new();
@@ -146,14 +169,14 @@ impl Lexer {
                     break;
                 };
 
-                match self.token(rest) {
+                match self.token(rest, interner)? {
                     Some(pair) => {
                         rest = pair.0;
-                        tokens.push(pair.1)
+                        tokens.push(pair.1).map_err(|_| Error::TooManyTokens)?
                     }
                     None => {
                         return Err(Error::UnrecognizedToken {
-                            value: rest.to_string(),
+                            value: String::from_str(rest).map_err(|_| Error::StringTooLong)?,
                             line: self.line,
                             column: self.column,
                         });
@@ -170,37 +193,60 @@ impl Lexer {
 
 #[cfg(test)]
 mod tests {
+    use misp_num::decimal::Decimal;
+
     use super::*;
+
+    const MAX_STR: usize = 32;
+    const MAX_LIST: usize = 0;
+    const MAX_INTERN: usize = 32;
+
+    type DefaultLexer = Lexer<MAX_STR, 1024, MAX_LIST, MAX_INTERN>;
+    type DefaultInterner = Interner<MAX_STR, MAX_LIST, MAX_INTERN>;
+
+    macro_rules! assert_ident {
+        ($token: expr, $interner: expr, $str: expr) => {
+            if let Token::Ident(id) = $token {
+                assert!($interner.get_string(id).is_some_and(|str| str == $str))
+            } else {
+                panic!()
+            }
+        };
+    }
 
     #[test]
     fn test_basic_addition() {
-        let mut lexer = Lexer::default();
-        let input = "(+ 10 4)";
-        let tokens = lexer.lex(input).unwrap();
+        let mut interner = DefaultInterner::default();
+        let mut lexer = DefaultLexer::default();
 
-        let mut kinds = tokens.iter();
-        assert_eq!(kinds.next().unwrap(), &Token::LeftParen);
-        assert_eq!(kinds.next().unwrap(), &Token::Ident("+".to_string()));
-        assert_eq!(kinds.next().unwrap(), &Token::Decimal(Decimal::from(10)));
-        assert_eq!(kinds.next().unwrap(), &Token::Decimal(Decimal::from(4)));
-        assert_eq!(kinds.next().unwrap(), &Token::RightParen);
+        let input = "(+ 10 4)";
+        let tokens = lexer.lex(input, &mut interner).unwrap();
+
+        let mut kinds = tokens.into_iter();
+        assert_eq!(kinds.next().unwrap(), Token::LeftParen);
+        assert_ident!(kinds.next().unwrap(), interner, "+");
+        assert_eq!(kinds.next().unwrap(), Token::Decimal(Decimal::from(10)));
+        assert_eq!(kinds.next().unwrap(), Token::Decimal(Decimal::from(4)));
+        assert_eq!(kinds.next().unwrap(), Token::RightParen);
     }
 
     #[test]
     fn test_compound_math() {
-        let mut lexer = Lexer::default();
-        let input = "(+ (* 10 15) 4)";
-        let tokens = lexer.lex(input).unwrap();
+        let mut interner = DefaultInterner::default();
+        let mut lexer = DefaultLexer::default();
 
-        let mut kinds = tokens.iter();
-        assert_eq!(kinds.next().unwrap(), &Token::LeftParen);
-        assert_eq!(kinds.next().unwrap(), &Token::Ident("+".to_string()));
-        assert_eq!(kinds.next().unwrap(), &Token::LeftParen);
-        assert_eq!(kinds.next().unwrap(), &Token::Ident("*".to_string()));
-        assert_eq!(kinds.next().unwrap(), &Token::Decimal(Decimal::from(10)));
-        assert_eq!(kinds.next().unwrap(), &Token::Decimal(Decimal::from(15)));
-        assert_eq!(kinds.next().unwrap(), &Token::RightParen);
-        assert_eq!(kinds.next().unwrap(), &Token::Decimal(Decimal::from(4)));
-        assert_eq!(kinds.next().unwrap(), &Token::RightParen);
+        let input = "(+ (* 10 15) 4)";
+        let tokens = lexer.lex(input, &mut interner).unwrap();
+
+        let mut kinds = tokens.into_iter();
+        assert_eq!(kinds.next().unwrap(), Token::LeftParen);
+        assert_ident!(kinds.next().unwrap(), interner, "+");
+        assert_eq!(kinds.next().unwrap(), Token::LeftParen);
+        assert_ident!(kinds.next().unwrap(), interner, "*");
+        assert_eq!(kinds.next().unwrap(), Token::Decimal(Decimal::from(10)));
+        assert_eq!(kinds.next().unwrap(), Token::Decimal(Decimal::from(15)));
+        assert_eq!(kinds.next().unwrap(), Token::RightParen);
+        assert_eq!(kinds.next().unwrap(), Token::Decimal(Decimal::from(4)));
+        assert_eq!(kinds.next().unwrap(), Token::RightParen);
     }
 }

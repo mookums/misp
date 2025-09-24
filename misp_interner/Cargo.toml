@@ -1,13 +1,11 @@
 [package]
-name = "misp_parser"
+name = "misp_interner"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-misp_lexer = { path = "../misp_lexer" }
-misp_num = { path = "../misp_num" }
 misp_common = { path = "../misp_common" }
-misp_interner = { path = "../misp_interner" }
+misp_num = { path = "../misp_num" }
 
 heapless.workspace = true
 thiserror.workspace = true

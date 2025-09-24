@@ -1,25 +1,98 @@
-use std::{
+use core::{
     pin::Pin,
-    task::{Poll, Waker},
+    task::{Context, Poll, Waker},
 };
 
 use crate::{Error, Executor, Value};
 
 #[derive(Debug, Default)]
-pub struct EvalFutureContext {
-    pub result: Option<Result<Value, Error>>,
+pub struct EvalFutureContext<
+    const MAX_STR: usize,
+    const MAX_TOKENS: usize,
+    const MAX_LIST: usize,
+    const MAX_INTERN: usize,
+    const MAX_INSTRUCTIONS: usize,
+    const MAX_STACK: usize,
+    const MAX_MEMOS: usize,
+    const MAX_FUTURES: usize,
+> {
+    pub result: Option<
+        Result<
+            Value<
+                MAX_STR,
+                MAX_TOKENS,
+                MAX_LIST,
+                MAX_INTERN,
+                MAX_INSTRUCTIONS,
+                MAX_STACK,
+                MAX_MEMOS,
+                MAX_FUTURES,
+            >,
+            Error,
+        >,
+    >,
     pub waker: Option<Waker>,
 }
 
-pub struct EvalFuture {
+pub struct EvalFuture<
+    const MAX_STR: usize,
+    const MAX_TOKENS: usize,
+    const MAX_LIST: usize,
+    const MAX_INTERN: usize,
+    const MAX_INSTRUCTIONS: usize,
+    const MAX_STACK: usize,
+    const MAX_MEMOS: usize,
+    const MAX_FUTURES: usize,
+> {
     pub id: usize,
-    pub executor: *mut Executor,
+    pub executor: *mut Executor<
+        MAX_STR,
+        MAX_TOKENS,
+        MAX_LIST,
+        MAX_INTERN,
+        MAX_INSTRUCTIONS,
+        MAX_STACK,
+        MAX_MEMOS,
+        MAX_FUTURES,
+    >,
 }
 
-impl Future for EvalFuture {
-    type Output = Result<Value, Error>;
+impl<
+    const MAX_STR: usize,
+    const MAX_TOKENS: usize,
+    const MAX_LIST: usize,
+    const MAX_INTERN: usize,
+    const MAX_INSTRUCTIONS: usize,
+    const MAX_STACK: usize,
+    const MAX_MEMOS: usize,
+    const MAX_FUTURES: usize,
+> Future
+    for EvalFuture<
+        MAX_STR,
+        MAX_TOKENS,
+        MAX_LIST,
+        MAX_INTERN,
+        MAX_INSTRUCTIONS,
+        MAX_STACK,
+        MAX_MEMOS,
+        MAX_FUTURES,
+    >
+{
+    type Output = Result<
+        Value<
+            MAX_STR,
+            MAX_TOKENS,
+            MAX_LIST,
+            MAX_INTERN,
+            MAX_INSTRUCTIONS,
+            MAX_STACK,
+            MAX_MEMOS,
+            MAX_FUTURES,
+        >,
+        Error,
+    >;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let fut = self.get_mut();
         let executor = unsafe { &mut *fut.executor };
 

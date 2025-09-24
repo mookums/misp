@@ -1,6 +1,9 @@
-use std::{collections::VecDeque, fmt::Display};
+#![no_std]
 
-use misp_lexer::Token;
+use heapless::{Deque, Vec};
+use misp_common::{intern::SExprId, sexpr::SExpr, token::Token};
+use misp_interner::Interner;
+
 use misp_num::decimal::Decimal;
 
 #[derive(Debug, thiserror::Error)]
@@ -9,55 +12,60 @@ pub enum Error {
     UnexpectedToken,
 }
 
-#[derive(Debug, Clone)]
-pub enum SExpr {
-    Atom(String),
-    List(Vec<SExpr>),
-
-    Decimal(Decimal),
-}
-
 #[derive(Debug, Clone, Default)]
-pub struct Parser {
-    tokens: VecDeque<Token>,
+pub struct Parser<
+    const MAX_STR: usize,
+    const MAX_TOKENS: usize,
+    const MAX_LIST: usize,
+    const MAX_INTERN: usize,
+> {
+    tokens: Deque<Token<MAX_STR>, MAX_TOKENS>,
 }
 
-impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Parser {
-        Parser {
-            tokens: tokens.into(),
+impl<const MAX_STR: usize, const MAX_TOKENS: usize, const MAX_LIST: usize, const MAX_INTERN: usize>
+    Parser<MAX_STR, MAX_TOKENS, MAX_LIST, MAX_INTERN>
+{
+    pub fn new(
+        tokens: Vec<Token<MAX_STR>, MAX_STR>,
+    ) -> Parser<MAX_STR, MAX_TOKENS, MAX_LIST, MAX_INTERN> {
+        let mut deque = Deque::new();
+
+        // Convert Vec to Deque
+        for token in tokens {
+            deque.push_back(token).unwrap();
+        }
+
+        Self { tokens: deque }
+    }
+
+    pub fn insert_tokens(&mut self, tokens: Vec<Token<MAX_STR>, MAX_TOKENS>) {
+        for token in tokens {
+            self.tokens.push_back(token).unwrap();
         }
     }
 
-    pub fn insert_tokens(&mut self, tokens: Vec<Token>) {
-        self.tokens = tokens.into();
+    pub fn parse(
+        &mut self,
+        interner: &mut Interner<MAX_STR, MAX_LIST, MAX_INTERN>,
+    ) -> Result<SExprId, Error> {
+        self.parse_expr(interner)
     }
 
-    pub fn parse(&mut self) -> Result<SExpr, Error> {
-        self.parse_expr()
-    }
-
-    pub fn parse_multiple(&mut self) -> Result<Vec<SExpr>, Error> {
-        let mut exprs = Vec::new();
-
-        while !self.is_at_end() {
-            exprs.push(self.parse_expr()?);
-        }
-
-        Ok(exprs)
-    }
-
-    fn parse_expr(&mut self) -> Result<SExpr, Error> {
+    fn parse_expr(
+        &mut self,
+        interner: &mut Interner<MAX_STR, MAX_LIST, MAX_INTERN>,
+    ) -> Result<SExprId, Error> {
         let next = self.advance().unwrap();
 
-        match next {
-            Token::Ident(data) => Ok(SExpr::Atom(data)),
-            Token::Decimal(decimal) => Ok(SExpr::Decimal(decimal)),
+        let expr = match next {
+            Token::Ident(data) => SExpr::Atom(data),
+            Token::Decimal(decimal) => SExpr::Decimal(decimal),
             Token::LeftParen => {
                 let mut exprs = Vec::new();
 
                 while self.peek().is_some_and(|p| p != &Token::RightParen) {
-                    exprs.push(self.parse_expr()?);
+                    let id = self.parse_expr(interner)?;
+                    exprs.push(id).unwrap();
                 }
 
                 match self.advance() {
@@ -65,34 +73,19 @@ impl Parser {
                     _ => return Err(Error::UnexpectedToken),
                 }
 
-                Ok(SExpr::List(exprs))
+                SExpr::List(exprs)
             }
             _ => todo!(),
-        }
+        };
+
+        Ok(interner.intern_sexpr(expr).unwrap())
     }
 
-    fn peek(&self) -> Option<&Token> {
+    fn peek(&self) -> Option<&Token<MAX_STR>> {
         self.tokens.front()
     }
 
-    fn advance(&mut self) -> Option<Token> {
+    fn advance(&mut self) -> Option<Token<MAX_STR>> {
         self.tokens.pop_front()
-    }
-
-    fn is_at_end(&self) -> bool {
-        self.peek().is_none()
-    }
-}
-
-impl Display for SExpr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SExpr::Atom(s) => write!(f, "{}", s),
-            SExpr::List(exprs) => {
-                let items: Vec<String> = exprs.iter().map(|e| e.to_string()).collect();
-                write!(f, "({})", items.join(" "))
-            }
-            SExpr::Decimal(d) => write!(f, "{d}",),
-        }
     }
 }

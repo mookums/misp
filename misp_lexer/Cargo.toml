@@ -5,5 +5,8 @@ edition = "2024"
 
 [dependencies]
 misp_num = { path = "../misp_num" }
+misp_common = { path = "../misp_common" }
+misp_interner = { path = "../misp_interner" }
 
+heapless.workspace = true
 thiserror.workspace = true

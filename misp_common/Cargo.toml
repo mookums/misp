@@ -1,0 +1,9 @@
+[package]
+name = "misp_common"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+misp_num = { path = "../misp_num" }
+
+heapless.workspace = true

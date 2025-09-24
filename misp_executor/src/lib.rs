@@ -1,18 +1,22 @@
+#![no_std]
+
 mod builtin;
 pub mod config;
 pub mod environment;
 pub mod future;
 
-use std::{
-    collections::{BTreeMap, VecDeque},
-    hash::{DefaultHasher, Hash, Hasher},
+extern crate alloc;
+use alloc::boxed::Box;
+
+use core::{
+    hash::SipHasher,
     pin::{Pin, pin},
-    rc::Rc,
     task::{Context, Poll, Waker},
 };
 
+use heapless::{Deque, String, Vec, index_map::FnvIndexMap};
+use misp_common::intern::{StringId, ValueId};
 use misp_num::decimal::Decimal;
-use misp_parser::SExpr;
 
 use crate::{
     builtin::{
@@ -31,45 +35,142 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Hash)]
-pub struct Lambda {
-    pub params: Vec<String>,
-    pub body: Box<Value>,
+pub struct Lambda<const MAX_STR: usize, const MAX_LIST: usize> {
+    pub params: Vec<String<MAX_STR>, MAX_LIST>,
+    pub body: ValueId,
 }
 
-type NativeMispFuture = Pin<Box<dyn Future<Output = Result<Value, Error>> + 'static>>;
-type NativeMispFunction = fn(*mut Executor) -> NativeMispFuture;
+type NativeMispFuture<
+    const MAX_STR: usize,
+    const MAX_TOKENS: usize,
+    const MAX_LIST: usize,
+    const MAX_INTERN: usize,
+    const MAX_INSTRUCTIONS: usize,
+    const MAX_STACK: usize,
+    const MAX_MEMOS: usize,
+    const MAX_FUTURES: usize,
+> = Pin<
+    Box<
+        dyn Future<
+                Output = Result<
+                    Value<
+                        MAX_STR,
+                        MAX_TOKENS,
+                        MAX_LIST,
+                        MAX_INTERN,
+                        MAX_INSTRUCTIONS,
+                        MAX_STACK,
+                        MAX_MEMOS,
+                        MAX_FUTURES,
+                    >,
+                    (),
+                >,
+            > + 'static,
+    >,
+>;
+
+type NativeMispFunction<
+    const MAX_STR: usize,
+    const MAX_TOKENS: usize,
+    const MAX_LIST: usize,
+    const MAX_INTERN: usize,
+    const MAX_INSTRUCTIONS: usize,
+    const MAX_STACK: usize,
+    const MAX_MEMOS: usize,
+    const MAX_FUTURES: usize,
+> = fn(
+    *mut Executor<
+        MAX_STR,
+        MAX_TOKENS,
+        MAX_LIST,
+        MAX_INTERN,
+        MAX_INSTRUCTIONS,
+        MAX_STACK,
+        MAX_MEMOS,
+        MAX_FUTURES,
+    >,
+) -> NativeMispFuture<
+    MAX_STR,
+    MAX_TOKENS,
+    MAX_LIST,
+    MAX_INTERN,
+    MAX_INSTRUCTIONS,
+    MAX_STACK,
+    MAX_MEMOS,
+    MAX_FUTURES,
+>;
 
 #[derive(Debug, Clone, Hash)]
-pub struct RuntimeMispFunction {
+pub struct RuntimeMispFunction<const MAX_LIST: usize> {
     pub id: usize,
-    pub params: Rc<Vec<String>>,
-    pub body: Rc<Value>,
+    pub params: Vec<StringId, MAX_LIST>,
+    pub body: ValueId,
 }
 
 #[derive(Debug, Clone, Hash)]
-pub enum Function {
-    Native(NativeMispFunction),
-    Runtime(RuntimeMispFunction),
-    Lambda(Lambda),
+pub enum Function<
+    const MAX_STR: usize,
+    const MAX_TOKENS: usize,
+    const MAX_LIST: usize,
+    const MAX_INTERN: usize,
+    const MAX_INSTRUCTIONS: usize,
+    const MAX_STACK: usize,
+    const MAX_MEMOS: usize,
+    const MAX_FUTURES: usize,
+> {
+    Native(
+        NativeMispFunction<
+            MAX_STR,
+            MAX_TOKENS,
+            MAX_LIST,
+            MAX_INTERN,
+            MAX_INSTRUCTIONS,
+            MAX_STACK,
+            MAX_MEMOS,
+            MAX_FUTURES,
+        >,
+    ),
+    Runtime(RuntimeMispFunction<MAX_LIST>),
+    Lambda(Lambda<MAX_STR, MAX_LIST>),
 }
 
 #[derive(Debug, Clone, Hash)]
-pub enum Value {
-    Atom(String),
-    List(Vec<Value>),
+pub enum Value<
+    const MAX_STR: usize,
+    const MAX_TOKENS: usize,
+    const MAX_LIST: usize,
+    const MAX_INTERN: usize,
+    const MAX_INSTRUCTIONS: usize,
+    const MAX_STACK: usize,
+    const MAX_MEMOS: usize,
+    const MAX_FUTURES: usize,
+> {
+    Atom(StringId),
+    List(Vec<ValueId, MAX_LIST>),
     Decimal(Decimal),
-    Function(Function),
+    Function(
+        Function<
+            MAX_STR,
+            MAX_TOKENS,
+            MAX_LIST,
+            MAX_INTERN,
+            MAX_INSTRUCTIONS,
+            MAX_STACK,
+            MAX_MEMOS,
+            MAX_FUTURES,
+        >,
+    ),
 }
 
-impl From<SExpr> for Value {
-    fn from(value: SExpr) -> Self {
-        match value {
-            SExpr::Atom(str) => Value::Atom(str),
-            SExpr::List(sexprs) => Value::List(sexprs.into_iter().map(|e| e.into()).collect()),
-            SExpr::Decimal(d) => Value::Decimal(d),
-        }
-    }
-}
+// impl From<SExpr<_>> for Value<_> {
+//     fn from(value: SExpr<_>) -> Self {
+//         match value {
+//             SExpr::Atom(str) => Value::Atom(str),
+//             SExpr::List(sexprs) => Value::List(sexprs.into_iter().map(|e| e.into()).collect()),
+//             SExpr::Decimal(d) => Value::Decimal(d),
+//         }
+//     }
+// }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MemoKey {
@@ -78,10 +179,10 @@ pub struct MemoKey {
 }
 
 #[derive(Debug, Clone)]
-pub enum Instruction {
-    Push(Value),
-    Store(String),
-    Load(String),
+pub enum Instruction<const MAX_LIST: usize> {
+    Push(ValueId),
+    Store(StringId),
+    Load(StringId),
     Call(usize),
     PushScope,
     PushDefinedScope(Scope),
@@ -89,22 +190,22 @@ pub enum Instruction {
     Resume(usize),
     Await(usize),
     Marker(usize),
-    MemoCheck { id: usize, params: Rc<Vec<String>> },
-    MemoStore { id: usize, params: Rc<Vec<String>> },
+    MemoCheck {
+        id: usize,
+        params: Vec<StringId, MAX_LIST>,
+    },
+    MemoStore {
+        id: usize,
+        params: Vec<StringId, MAX_LIST>,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Unknown Symbol: {0}")]
-    UnknownSymbol(String),
     #[error("Invalid Function Call")]
     FunctionCall,
-    #[error("Wrong arity for '{name}': expected {expected}, got {actual}")]
-    FunctionArity {
-        name: String,
-        expected: usize,
-        actual: usize,
-    },
+    #[error("Wrong arity: expected {expected}, got {actual}")]
+    FunctionArity { expected: usize, actual: usize },
     #[error("Function not found")]
     FunctionNotFound,
     #[error("Invalid type")]
@@ -113,41 +214,123 @@ pub enum Error {
     EmptyStack,
 }
 
-pub struct Injector<'a> {
-    instructions: &'a mut VecDeque<Instruction>,
+pub struct Injector<'a, const MAX_LIST: usize, const MAX_INSTRUCTIONS: usize> {
+    instructions: &'a mut Deque<Instruction<MAX_LIST>, MAX_INSTRUCTIONS>,
     index: usize,
 }
 
-impl<'a> Injector<'a> {
-    pub fn new(instructions: &'a mut VecDeque<Instruction>) -> Self {
+impl<'a, const MAX_LIST: usize, const MAX_INSTRUCTIONS: usize>
+    Injector<'a, MAX_LIST, MAX_INSTRUCTIONS>
+{
+    pub fn new(instructions: &'a mut Deque<Instruction<MAX_LIST>, MAX_INSTRUCTIONS>) -> Self {
         Self {
             instructions,
             index: 0,
         }
     }
 
-    pub fn inject(&mut self, instruction: Instruction) {
+    pub fn inject(&mut self, instruction: Instruction<MAX_LIST>) {
         self.instructions.insert(self.index, instruction);
         self.index += 1;
     }
 }
 
-pub struct Executor {
+pub struct Executor<
+    const MAX_STR: usize,
+    const MAX_TOKENS: usize,
+    const MAX_LIST: usize,
+    const MAX_INTERN: usize,
+    const MAX_INSTRUCTIONS: usize,
+    const MAX_STACK: usize,
+    const MAX_MEMOS: usize,
+    const MAX_FUTURES: usize,
+> {
     pub config: Config,
     pub env: Environment,
-    pub instructions: VecDeque<Instruction>,
-    pub stack: Vec<Value>,
+    pub instructions: Deque<Instruction<MAX_LIST>, MAX_INSTRUCTIONS>,
+    pub stack: Vec<
+        Value<
+            MAX_STR,
+            MAX_TOKENS,
+            MAX_LIST,
+            MAX_INTERN,
+            MAX_INSTRUCTIONS,
+            MAX_STACK,
+            MAX_MEMOS,
+            MAX_FUTURES,
+        >,
+        MAX_STACK,
+    >,
 
-    pub memos: BTreeMap<MemoKey, Value>,
+    pub memos: FnvIndexMap<
+        MemoKey,
+        Value<
+            MAX_STR,
+            MAX_TOKENS,
+            MAX_LIST,
+            MAX_INTERN,
+            MAX_INSTRUCTIONS,
+            MAX_STACK,
+            MAX_MEMOS,
+            MAX_FUTURES,
+        >,
+        MAX_MEMOS,
+    >,
     pub next_function_id: usize,
 
     pub waker: &'static Waker,
-    pub futures: BTreeMap<usize, EvalFutureContext>,
-    pub native_futures: BTreeMap<usize, NativeMispFuture>,
+    pub futures: FnvIndexMap<
+        usize,
+        EvalFutureContext<
+            MAX_STR,
+            MAX_TOKENS,
+            MAX_LIST,
+            MAX_INTERN,
+            MAX_INSTRUCTIONS,
+            MAX_STACK,
+            MAX_MEMOS,
+            MAX_FUTURES,
+        >,
+        MAX_FUTURES,
+    >,
+    pub native_futures: FnvIndexMap<
+        usize,
+        NativeMispFuture<
+            MAX_STR,
+            MAX_TOKENS,
+            MAX_LIST,
+            MAX_INTERN,
+            MAX_INSTRUCTIONS,
+            MAX_STACK,
+            MAX_MEMOS,
+            MAX_FUTURES,
+        >,
+        MAX_FUTURES,
+    >,
     pub next_future_id: usize,
 }
 
-impl Default for Executor {
+impl<
+    const MAX_STR: usize,
+    const MAX_TOKENS: usize,
+    const MAX_LIST: usize,
+    const MAX_INTERN: usize,
+    const MAX_INSTRUCTIONS: usize,
+    const MAX_STACK: usize,
+    const MAX_MEMOS: usize,
+    const MAX_FUTURES: usize,
+> Default
+    for Executor<
+        MAX_STR,
+        MAX_TOKENS,
+        MAX_LIST,
+        MAX_INTERN,
+        MAX_INSTRUCTIONS,
+        MAX_STACK,
+        MAX_MEMOS,
+        MAX_FUTURES,
+    >
+{
     fn default() -> Self {
         let config = Config::default();
         let mut env = Environment::default();
@@ -199,20 +382,52 @@ impl Default for Executor {
         Self {
             config,
             env,
-            instructions: VecDeque::default(),
+            instructions: Deque::default(),
             stack: Vec::default(),
             next_function_id: 0,
-            memos: BTreeMap::default(),
+            memos: FnvIndexMap::default(),
             waker: Waker::noop(),
-            futures: BTreeMap::default(),
-            native_futures: BTreeMap::default(),
+            futures: FnvIndexMap::default(),
+            native_futures: FnvIndexMap::default(),
             next_future_id: 0,
         }
     }
 }
 
-impl Executor {
-    pub fn compile(value: Value, injector: &mut Injector) -> Result<(), Error> {
+impl<
+    const MAX_STR: usize,
+    const MAX_TOKENS: usize,
+    const MAX_LIST: usize,
+    const MAX_INTERN: usize,
+    const MAX_INSTRUCTIONS: usize,
+    const MAX_STACK: usize,
+    const MAX_MEMOS: usize,
+    const MAX_FUTURES: usize,
+>
+    Executor<
+        MAX_STR,
+        MAX_TOKENS,
+        MAX_LIST,
+        MAX_INTERN,
+        MAX_INSTRUCTIONS,
+        MAX_STACK,
+        MAX_MEMOS,
+        MAX_FUTURES,
+    >
+{
+    pub fn compile(
+        value: Value<
+            MAX_STR,
+            MAX_TOKENS,
+            MAX_LIST,
+            MAX_INTERN,
+            MAX_INSTRUCTIONS,
+            MAX_STACK,
+            MAX_MEMOS,
+            MAX_FUTURES,
+        >,
+        injector: &mut Injector<'_, MAX_LIST, MAX_INSTRUCTIONS>,
+    ) -> Result<(), Error> {
         match value {
             Value::Atom(atom) => injector.inject(Instruction::Load(atom)),
             Value::Decimal(_) | Value::Function(_) => {
@@ -238,7 +453,19 @@ impl Executor {
         Ok(())
     }
 
-    pub fn compile_function(&mut self, function: Function) -> Result<(), Error> {
+    pub fn compile_function(
+        &mut self,
+        function: Function<
+            MAX_STR,
+            MAX_TOKENS,
+            MAX_LIST,
+            MAX_INTERN,
+            MAX_INSTRUCTIONS,
+            MAX_STACK,
+            MAX_MEMOS,
+            MAX_FUTURES,
+        >,
+    ) -> Result<(), Error> {
         match function {
             Function::Native(f) => {
                 let native_future = f(self);
@@ -252,7 +479,7 @@ impl Executor {
                 injector.inject(Instruction::Await(future_id));
             }
             Function::Runtime(f) => {
-                arity_check!(self, "<func>", f.params.len());
+                arity_check!(self, f.params.len());
 
                 let mut injector = Injector {
                     instructions: &mut self.instructions,
@@ -284,7 +511,7 @@ impl Executor {
                 injector.inject(Instruction::PopScope);
             }
             Function::Lambda(l) => {
-                arity_check!(self, "<lambda>", l.params.len());
+                arity_check!(self, l.params.len());
 
                 let mut injector = Injector {
                     instructions: &mut self.instructions,
@@ -307,7 +534,7 @@ impl Executor {
         Ok(())
     }
 
-    fn execute_instruction(self: &mut Executor, instruction: Instruction) -> Result<(), Error> {
+    fn execute_instruction(&mut self, instruction: Instruction<MAX_LIST>) -> Result<(), Error> {
         // eprintln!("Current Instruction: {instruction:?}");
         // eprintln!("Instructions: {:?}", self.instructions);
         // eprintln!("Memos: {:?}", self.memos);
@@ -351,7 +578,7 @@ impl Executor {
             }
             Instruction::Marker(_) => {}
             Instruction::MemoCheck { id, params } => {
-                let mut hasher = DefaultHasher::default();
+                let mut hasher = SipHasher::default();
                 for param in params.iter() {
                     let value = self.env.get(param).unwrap();
                     value.hash(&mut hasher);
@@ -374,7 +601,7 @@ impl Executor {
                 }
             }
             Instruction::MemoStore { id, params } => {
-                let mut hasher = DefaultHasher::default();
+                let mut hasher = SipHasher::default();
                 for param in params.iter() {
                     let value = self.env.get(param).unwrap();
                     value.hash(&mut hasher);
@@ -422,7 +649,44 @@ impl Executor {
         Ok(())
     }
 
-    async fn run_function(&mut self, func: Function, args: Vec<Value>) -> Result<Value, Error> {
+    async fn run_function(
+        &mut self,
+        func: Function<
+            MAX_STR,
+            MAX_TOKENS,
+            MAX_LIST,
+            MAX_INTERN,
+            MAX_INSTRUCTIONS,
+            MAX_STACK,
+            MAX_MEMOS,
+            MAX_FUTURES,
+        >,
+        args: Vec<
+            Value<
+                MAX_STR,
+                MAX_TOKENS,
+                MAX_LIST,
+                MAX_INTERN,
+                MAX_INSTRUCTIONS,
+                MAX_STACK,
+                MAX_MEMOS,
+                MAX_FUTURES,
+            >,
+            MAX_LIST,
+        >,
+    ) -> Result<
+        Value<
+            MAX_STR,
+            MAX_TOKENS,
+            MAX_LIST,
+            MAX_INTERN,
+            MAX_INSTRUCTIONS,
+            MAX_STACK,
+            MAX_MEMOS,
+            MAX_FUTURES,
+        >,
+        Error,
+    > {
         let future_id = self.next_future_id;
         self.next_future_id += 1;
 
@@ -445,7 +709,28 @@ impl Executor {
         .await
     }
 
-    pub fn eval(&mut self, expr: Value) -> EvalFuture {
+    pub fn eval(
+        &mut self,
+        expr: Value<
+            MAX_STR,
+            MAX_TOKENS,
+            MAX_LIST,
+            MAX_INTERN,
+            MAX_INSTRUCTIONS,
+            MAX_STACK,
+            MAX_MEMOS,
+            MAX_FUTURES,
+        >,
+    ) -> EvalFuture<
+        MAX_STR,
+        MAX_TOKENS,
+        MAX_LIST,
+        MAX_INTERN,
+        MAX_INSTRUCTIONS,
+        MAX_STACK,
+        MAX_MEMOS,
+        MAX_FUTURES,
+    > {
         let future_id = self.next_future_id;
         self.next_future_id += 1;
 
@@ -461,7 +746,31 @@ impl Executor {
         }
     }
 
-    pub fn execute(&mut self, value: Value) -> Result<Value, Error> {
+    pub fn execute(
+        &mut self,
+        value: Value<
+            MAX_STR,
+            MAX_TOKENS,
+            MAX_LIST,
+            MAX_INTERN,
+            MAX_INSTRUCTIONS,
+            MAX_STACK,
+            MAX_MEMOS,
+            MAX_FUTURES,
+        >,
+    ) -> Result<
+        Value<
+            MAX_STR,
+            MAX_TOKENS,
+            MAX_LIST,
+            MAX_INTERN,
+            MAX_INSTRUCTIONS,
+            MAX_STACK,
+            MAX_MEMOS,
+            MAX_FUTURES,
+        >,
+        Error,
+    > {
         self.instructions.clear();
         self.stack.clear();
         self.memos.clear();
