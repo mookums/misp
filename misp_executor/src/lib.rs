@@ -14,6 +14,7 @@ use alloc::{
     vec::Vec,
 };
 use fnv::FnvHasher;
+use futures::FutureExt;
 
 use core::{
     hash::{Hash, Hasher},
@@ -251,15 +252,24 @@ impl Executor {
     pub fn compile_function(&mut self, function: Function) -> Result<(), Error> {
         match function {
             Function::Native(f) => {
-                let native_future = f(self);
+                let mut native_future = f(self);
 
-                let future_id = self.next_future_id;
-                self.next_future_id += 1;
+                match native_future.poll_unpin(&mut Context::from_waker(self.waker)) {
+                    Poll::Ready(value) => {
+                        let value = value?;
+                        self.stack.push(value);
+                        return Ok(());
+                    }
+                    Poll::Pending => {
+                        let future_id = self.next_future_id;
+                        self.next_future_id += 1;
 
-                self.native_futures.insert(future_id, native_future);
+                        self.native_futures.insert(future_id, native_future);
 
-                let mut injector = Injector::new(&mut self.instructions);
-                injector.inject(Instruction::Await(future_id));
+                        let mut injector = Injector::new(&mut self.instructions);
+                        injector.inject(Instruction::Await(future_id));
+                    }
+                }
             }
             Function::Runtime(f) => {
                 arity_check!(self, "<func>", f.params.len());
