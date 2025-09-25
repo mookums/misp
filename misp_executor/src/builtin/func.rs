@@ -36,7 +36,7 @@ pub fn builtin_func(executor: *mut Executor) -> NativeMispFuture {
 
         let function = Value::Function(Function::Runtime(RuntimeMispFunction {
             id: function_id,
-            params: params.into(),
+            params,
             body: body.into(),
         }));
 
@@ -71,7 +71,7 @@ pub fn builtin_lambda(executor: *mut Executor) -> NativeMispFuture {
 
         let lambda = Value::Function(Function::Lambda(Lambda {
             params,
-            body: Box::new(body),
+            body: body.into(),
         }));
 
         Ok(lambda)

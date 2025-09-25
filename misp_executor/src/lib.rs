@@ -1,3 +1,6 @@
+// #![no_std]
+// extern crate alloc;
+
 mod builtin;
 pub mod config;
 pub mod environment;
@@ -11,8 +14,9 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
+use misp_common::intern::StringId;
+use misp_interner::Interner;
 use misp_num::decimal::Decimal;
-use misp_parser::SExpr;
 
 use crate::{
     builtin::{
@@ -30,73 +34,10 @@ use crate::{
     future::{EvalFuture, EvalFutureContext},
 };
 
-#[derive(Debug, Clone, Hash)]
-pub struct Lambda {
-    pub params: Vec<String>,
-    pub body: Box<Value>,
-}
-
-type NativeMispFuture = Pin<Box<dyn Future<Output = Result<Value, Error>> + 'static>>;
-type NativeMispFunction = fn(*mut Executor) -> NativeMispFuture;
-
-#[derive(Debug, Clone, Hash)]
-pub struct RuntimeMispFunction {
-    pub id: usize,
-    pub params: Rc<Vec<String>>,
-    pub body: Rc<Value>,
-}
-
-#[derive(Debug, Clone, Hash)]
-pub enum Function {
-    Native(NativeMispFunction),
-    Runtime(RuntimeMispFunction),
-    Lambda(Lambda),
-}
-
-#[derive(Debug, Clone, Hash)]
-pub enum Value {
-    Atom(String),
-    List(Vec<Value>),
-    Decimal(Decimal),
-    Function(Function),
-}
-
-impl From<SExpr> for Value {
-    fn from(value: SExpr) -> Self {
-        match value {
-            SExpr::Atom(str) => Value::Atom(str),
-            SExpr::List(sexprs) => Value::List(sexprs.into_iter().map(|e| e.into()).collect()),
-            SExpr::Decimal(d) => Value::Decimal(d),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct MemoKey {
-    pub id: usize,
-    pub args_hash: u64,
-}
-
-#[derive(Debug, Clone)]
-pub enum Instruction {
-    Push(Value),
-    Store(String),
-    Load(String),
-    Call(usize),
-    PushScope,
-    PushDefinedScope(Scope),
-    PopScope,
-    Resume(usize),
-    Await(usize),
-    Marker(usize),
-    MemoCheck { id: usize, params: Rc<Vec<String>> },
-    MemoStore { id: usize, params: Rc<Vec<String>> },
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Unknown Symbol: {0}")]
-    UnknownSymbol(String),
+    #[error("Unknown Symbol")]
+    UnknownSymbol,
     #[error("Invalid Function Call")]
     FunctionCall,
     #[error("Wrong arity for '{name}': expected {expected}, got {actual}")]
@@ -111,6 +52,62 @@ pub enum Error {
     InvalidType,
     #[error("Empty Stack")]
     EmptyStack,
+}
+
+pub type NativeMispFuture = Pin<Box<dyn Future<Output = Result<Value, Error>> + 'static>>;
+pub type RawNativeMispFunction = fn(*mut Executor) -> NativeMispFuture;
+
+// This just wraps the raw function with a linked unique usized id.
+pub type NativeMispFunction = (usize, RawNativeMispFunction);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RuntimeMispFunction {
+    pub id: usize,
+    pub params: Vec<StringId>,
+    pub body: Rc<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Lambda {
+    pub params: Vec<StringId>,
+    pub body: Rc<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Function {
+    Native(NativeMispFunction),
+    Runtime(RuntimeMispFunction),
+    Lambda(Lambda),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Value {
+    Atom(StringId),
+    List(Vec<Value>),
+    Decimal(Decimal),
+    Function(Function),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MemoKey {
+    pub id: usize,
+    pub args_hash: u64,
+}
+
+#[derive(Debug, Clone)]
+pub enum Instruction {
+    Push(Value),
+    Store(StringId),
+    Load(StringId),
+    Call(usize),
+    PushScope,
+    PushDefinedScope(Scope),
+    PopScope,
+    Resume(usize),
+    Await(usize),
+    Marker(usize),
+    MemoCheck { id: usize, params: Vec<StringId> },
+    MemoStore { id: usize, params: Vec<StringId> },
 }
 
 pub struct Injector<'a> {
@@ -149,56 +146,9 @@ pub struct Executor {
 
 impl Default for Executor {
     fn default() -> Self {
-        let config = Config::default();
-        let mut env = Environment::default();
-
-        env.push_scope();
-        env.set_prev(Value::Decimal(Decimal::ZERO));
-
-        env.load_constants();
-
-        // Functions
-        env.define_native_function("func", builtin_func);
-        env.define_native_function("lambda", builtin_lambda);
-
-        // Control Functions
-        env.define_native_function("if", builtin_if);
-
-        // Math Functions
-        env.define_native_function("+", builtin_add);
-        env.define_native_function("-", builtin_minus);
-        env.define_native_function("*", builtin_multiply);
-        env.define_native_function("/", builtin_divide);
-        // env.define_native_function("%", builtin_mod);
-        env.define_native_function("==", builtin_equal);
-        env.define_native_function("!=", builtin_not_equal);
-        env.define_native_function("<", builtin_lt);
-        env.define_native_function("<=", builtin_lte);
-        env.define_native_function(">", builtin_gt);
-        env.define_native_function(">=", builtin_gte);
-        env.define_native_function("abs", builtin_abs);
-        env.define_native_function("min", builtin_min);
-        env.define_native_function("max", builtin_max);
-        env.define_native_function("pow", builtin_pow);
-        env.define_native_function("sqrt", builtin_sqrt);
-        env.define_native_function("summate", builtin_summate);
-
-        // Combinatorics
-        env.define_native_function("factorial", builtin_factorial);
-        env.define_native_function("combinations", builtin_combinations);
-        env.define_native_function("permutations", builtin_permutations);
-
-        // Trig Functions
-        // env.define_native_function("sin", builtin_sin);
-        // env.define_native_function("cos", builtin_cos);
-        // env.define_native_function("tan", builtin_tan);
-        // env.define_native_function("asin", builtin_asin);
-        // env.define_native_function("acos", builtin_acos);
-        // env.define_native_function("atan", builtin_atan);
-
         Self {
-            config,
-            env,
+            config: Config::default(),
+            env: Environment::default(),
             instructions: VecDeque::default(),
             stack: Vec::default(),
             next_function_id: 0,
@@ -212,21 +162,68 @@ impl Default for Executor {
 }
 
 impl Executor {
+    pub fn initalize_env(&mut self, interner: &mut Interner) {
+        let env = &mut self.env;
+
+        env.set_prev(Value::Decimal(Decimal::ZERO), interner);
+
+        env.load_constants(interner);
+
+        // Functions
+        env.define_native_function("func", builtin_func, interner);
+        env.define_native_function("lambda", builtin_lambda, interner);
+
+        // Control Functions
+        env.define_native_function("if", builtin_if, interner);
+
+        // Math Functions
+        env.define_native_function("+", builtin_add, interner);
+        env.define_native_function("-", builtin_minus, interner);
+        env.define_native_function("*", builtin_multiply, interner);
+        env.define_native_function("/", builtin_divide, interner);
+        // env.define_native_function("%", builtin_mod, interner);
+        env.define_native_function("==", builtin_equal, interner);
+        env.define_native_function("!=", builtin_not_equal, interner);
+        env.define_native_function("<", builtin_lt, interner);
+        env.define_native_function("<=", builtin_lte, interner);
+        env.define_native_function(">", builtin_gt, interner);
+        env.define_native_function(">=", builtin_gte, interner);
+        env.define_native_function("abs", builtin_abs, interner);
+        env.define_native_function("min", builtin_min, interner);
+        env.define_native_function("max", builtin_max, interner);
+        env.define_native_function("pow", builtin_pow, interner);
+        env.define_native_function("sqrt", builtin_sqrt, interner);
+        env.define_native_function("summate", builtin_summate, interner);
+
+        // Combinatorics
+        env.define_native_function("factorial", builtin_factorial, interner);
+        env.define_native_function("combinations", builtin_combinations, interner);
+        env.define_native_function("permutations", builtin_permutations, interner);
+
+        // Trig Functions
+        // env.define_native_function("sin", builtin_sin);
+        // env.define_native_function("cos", builtin_cos);
+        // env.define_native_function("tan", builtin_tan);
+        // env.define_native_function("asin", builtin_asin);
+        // env.define_native_function("acos", builtin_acos);
+        // env.define_native_function("atan", builtin_atan);
+    }
+
     pub fn compile(value: Value, injector: &mut Injector) -> Result<(), Error> {
         match value {
             Value::Atom(atom) => injector.inject(Instruction::Load(atom)),
             Value::Decimal(_) | Value::Function(_) => {
                 injector.inject(Instruction::Push(value));
             }
-            Value::List(mut values) => {
+            Value::List(values) => {
                 let arity = values.len() - 1;
+                let mut iter = values.into_iter();
 
-                let mut drain = values.drain(0..values.len());
-                let Value::Atom(name) = drain.next().unwrap() else {
+                let Value::Atom(name) = iter.next().unwrap() else {
                     return Err(Error::InvalidType);
                 };
 
-                for param in drain {
+                for param in iter {
                     injector.inject(Instruction::Push(param));
                 }
 
@@ -238,9 +235,9 @@ impl Executor {
         Ok(())
     }
 
-    pub fn compile_function(&mut self, function: Function) -> Result<(), Error> {
+    pub fn compile_function(&mut self, function: &Function) -> Result<(), Error> {
         match function {
-            Function::Native(f) => {
+            Function::Native((_, f)) => {
                 let native_future = f(self);
 
                 let future_id = self.next_future_id;
@@ -252,7 +249,7 @@ impl Executor {
                 injector.inject(Instruction::Await(future_id));
             }
             Function::Runtime(f) => {
-                arity_check!(self, "<func>", f.params.len());
+                // arity_check!(self, "<func>", f.params.len());
 
                 let mut injector = Injector {
                     instructions: &mut self.instructions,
@@ -262,9 +259,9 @@ impl Executor {
                 injector.inject(Instruction::PushScope);
 
                 // Reverse order ensures the correct value->name binding here.
-                for param in f.params.iter().rev() {
+                for param in f.params.iter().copied().rev() {
                     Self::compile(self.stack.pop().unwrap(), &mut injector)?;
-                    injector.inject(Instruction::Store(param.clone()));
+                    injector.inject(Instruction::Store(param));
                 }
 
                 injector.inject(Instruction::MemoCheck {
@@ -277,14 +274,14 @@ impl Executor {
 
                 injector.inject(Instruction::MemoStore {
                     id: f.id,
-                    params: f.params,
+                    params: f.params.clone(),
                 });
 
                 injector.inject(Instruction::Marker(f.id));
                 injector.inject(Instruction::PopScope);
             }
             Function::Lambda(l) => {
-                arity_check!(self, "<lambda>", l.params.len());
+                // arity_check!(self, "<lambda>", l.params.len());
 
                 let mut injector = Injector {
                     instructions: &mut self.instructions,
@@ -294,12 +291,13 @@ impl Executor {
                 injector.inject(Instruction::PushScope);
 
                 // Reverse order ensures the correct value->name binding here.
-                for param in l.params.into_iter().rev() {
+                for param in l.params.iter().copied().rev() {
                     Self::compile(self.stack.pop().unwrap(), &mut injector)?;
                     injector.inject(Instruction::Store(param));
                 }
 
-                Self::compile(*l.body, &mut injector)?;
+                let body = (*l.body).clone();
+                Self::compile(body, &mut injector)?;
                 injector.inject(Instruction::PopScope);
             }
         }
@@ -325,20 +323,20 @@ impl Executor {
                 self.env.set(name, self.stack.pop().unwrap());
             }
             Instruction::Load(name) => {
-                let value = self.env.get(&name).ok_or(Error::UnknownSymbol(name))?;
+                let value = self.env.get(name).ok_or(Error::UnknownSymbol)?;
                 self.stack.push(value.clone());
             }
             Instruction::Call(arity) => {
-                let func = self.stack.pop().unwrap();
+                let arity_decimal = Decimal::from(arity as u64);
 
-                match func {
-                    Value::Function(f) => {
-                        let arity_decimal = Decimal::from(arity as u64);
-                        self.stack.push(Value::Decimal(arity_decimal));
-                        self.compile_function(f)?;
-                    }
-                    _ => return Err(Error::FunctionNotFound),
-                }
+                let value = self.stack.pop().unwrap();
+
+                let Value::Function(f) = value else {
+                    return Err(Error::FunctionNotFound);
+                };
+
+                self.stack.push(Value::Decimal(arity_decimal));
+                self.compile_function(&f)?;
             }
             Instruction::PushScope => {
                 self.env.push_scope();
@@ -352,7 +350,7 @@ impl Executor {
             Instruction::Marker(_) => {}
             Instruction::MemoCheck { id, params } => {
                 let mut hasher = DefaultHasher::default();
-                for param in params.iter() {
+                for param in params.into_iter() {
                     let value = self.env.get(param).unwrap();
                     value.hash(&mut hasher);
                 }
@@ -375,7 +373,7 @@ impl Executor {
             }
             Instruction::MemoStore { id, params } => {
                 let mut hasher = DefaultHasher::default();
-                for param in params.iter() {
+                for param in params.into_iter() {
                     let value = self.env.get(param).unwrap();
                     value.hash(&mut hasher);
                 }
@@ -409,7 +407,8 @@ impl Executor {
 
                 match future.as_mut().poll(&mut context) {
                     Poll::Ready(result) => {
-                        self.stack.push(result?);
+                        let value = result.unwrap();
+                        self.stack.push(value);
                         self.native_futures.remove(&id);
                     }
                     Poll::Pending => {
@@ -462,9 +461,8 @@ impl Executor {
     }
 
     pub fn execute(&mut self, value: Value) -> Result<Value, Error> {
-        self.instructions.clear();
-        self.stack.clear();
-        self.memos.clear();
+        self.next_future_id = 0;
+        self.next_function_id = 0;
 
         let future = self.eval(value);
         let mut main_future = pin!(future);
@@ -477,8 +475,7 @@ impl Executor {
 
             match main_future.as_mut().poll(&mut context) {
                 Poll::Ready(result) => {
-                    let result = result?;
-                    self.env.set_prev(result.clone());
+                    let result = result.unwrap();
                     return Ok(result);
                 }
                 Poll::Pending => continue,

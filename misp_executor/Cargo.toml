@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 futures = "0.3.31"
 
+misp_common = { path = "../misp_common" }
+misp_interner = { path = "../misp_interner" }
 misp_parser = { path = "../misp_parser" }
 misp_num = { path = "../misp_num" }
 thiserror.workspace = true

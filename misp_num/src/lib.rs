@@ -1,4 +1,7 @@
-use std::fmt::Display;
+#![no_std]
+extern crate alloc;
+
+use core::fmt::Display;
 
 pub mod decimal;
 pub mod number;
@@ -20,7 +23,7 @@ impl Sign {
 }
 
 impl Display for Sign {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Sign::Positive => write!(f, ""),
             Sign::Negative => write!(f, "-"),

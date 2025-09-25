@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+misp_common = { path = "../misp_common" }
+misp_interner = { path = "../misp_interner" }
 misp_lexer = { path = "../misp_lexer" }
 misp_num = { path = "../misp_num" }
 

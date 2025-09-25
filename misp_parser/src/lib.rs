@@ -1,20 +1,14 @@
-use std::{collections::VecDeque, fmt::Display};
+#![no_std]
+extern crate alloc;
 
-use misp_lexer::Token;
-use misp_num::decimal::Decimal;
+use alloc::{collections::vec_deque::VecDeque, vec::Vec};
+use misp_common::{sexpr::SExpr, token::Token};
+use misp_interner::Interner;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Unexpected Token")]
     UnexpectedToken,
-}
-
-#[derive(Debug, Clone)]
-pub enum SExpr {
-    Atom(String),
-    List(Vec<SExpr>),
-
-    Decimal(Decimal),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -33,21 +27,21 @@ impl Parser {
         self.tokens = tokens.into();
     }
 
-    pub fn parse(&mut self) -> Result<SExpr, Error> {
-        self.parse_expr()
+    pub fn parse(&mut self, interner: &mut Interner) -> Result<SExpr, Error> {
+        self.parse_expr(interner)
     }
 
-    pub fn parse_multiple(&mut self) -> Result<Vec<SExpr>, Error> {
+    pub fn parse_multiple(&mut self, interner: &mut Interner) -> Result<Vec<SExpr>, Error> {
         let mut exprs = Vec::new();
 
         while !self.is_at_end() {
-            exprs.push(self.parse_expr()?);
+            exprs.push(self.parse_expr(interner)?);
         }
 
         Ok(exprs)
     }
 
-    fn parse_expr(&mut self) -> Result<SExpr, Error> {
+    fn parse_expr(&mut self, interner: &mut Interner) -> Result<SExpr, Error> {
         let next = self.advance().unwrap();
 
         match next {
@@ -57,7 +51,9 @@ impl Parser {
                 let mut exprs = Vec::new();
 
                 while self.peek().is_some_and(|p| p != &Token::RightParen) {
-                    exprs.push(self.parse_expr()?);
+                    let expr = self.parse_expr(interner)?;
+                    let id = interner.intern_sexpr(expr).unwrap();
+                    exprs.push(id);
                 }
 
                 match self.advance() {
@@ -81,18 +77,5 @@ impl Parser {
 
     fn is_at_end(&self) -> bool {
         self.peek().is_none()
-    }
-}
-
-impl Display for SExpr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SExpr::Atom(s) => write!(f, "{}", s),
-            SExpr::List(exprs) => {
-                let items: Vec<String> = exprs.iter().map(|e| e.to_string()).collect();
-                write!(f, "({})", items.join(" "))
-            }
-            SExpr::Decimal(d) => write!(f, "{d}",),
-        }
     }
 }

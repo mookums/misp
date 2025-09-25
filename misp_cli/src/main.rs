@@ -87,7 +87,7 @@ impl App {
 
         let start = Instant::now();
         match self.misp.eval(&line) {
-            Ok(value) => self.history.push(Misp::print(&value)),
+            Ok(value) => self.history.push(self.misp.print(&value)),
             Err(err) => self.history.push(format!("{}", err)),
         }
         let end = start.elapsed();
@@ -185,7 +185,7 @@ fn main() {
                     "{}",
                     value
                         .iter()
-                        .map(Misp::print)
+                        .map(|v| misp.print(v))
                         .collect::<Vec<String>>()
                         .join(", ")
                 ),

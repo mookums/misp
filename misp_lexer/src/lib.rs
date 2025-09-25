@@ -1,14 +1,13 @@
-use misp_num::decimal::Decimal;
+#![no_std]
+extern crate alloc;
+
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
+use misp_common::token::Token;
+use misp_interner::Interner;
 use thiserror::Error;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Token {
-    LeftParen,
-    RightParen,
-    Ident(String),
-
-    Decimal(Decimal),
-}
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -91,7 +90,11 @@ impl Lexer {
         Some((remaining, token))
     }
 
-    fn ident_token<'a>(&mut self, rest: &'a str) -> Option<(&'a str, Token)> {
+    fn ident_token<'a>(
+        &mut self,
+        rest: &'a str,
+        interner: &mut Interner,
+    ) -> Option<(&'a str, Token)> {
         let chars = rest.char_indices();
         let mut end_pos = 0;
 
@@ -111,11 +114,11 @@ impl Lexer {
         let remaining = &rest[end_pos..];
 
         self.column += token_str.chars().count();
-
-        Some((remaining, Token::Ident(token_str.to_string())))
+        let id = interner.intern_string(token_str.to_string()).unwrap();
+        Some((remaining, Token::Ident(id)))
     }
 
-    fn token<'a>(&mut self, rest: &'a str) -> Option<(&'a str, Token)> {
+    fn token<'a>(&mut self, rest: &'a str, interner: &mut Interner) -> Option<(&'a str, Token)> {
         if let Some(literal) = self.literal_token(rest) {
             return Some(literal);
         }
@@ -124,7 +127,7 @@ impl Lexer {
             return Some(pair);
         }
 
-        self.ident_token(rest)
+        self.ident_token(rest, interner)
     }
 
     fn reset(&mut self) {
@@ -132,7 +135,7 @@ impl Lexer {
         self.column = 0;
     }
 
-    pub fn lex(&mut self, input: &str) -> Result<Vec<Token>, Error> {
+    pub fn lex(&mut self, input: &str, interner: &mut Interner) -> Result<Vec<Token>, Error> {
         self.reset();
 
         let mut tokens = Vec::new();
@@ -146,7 +149,7 @@ impl Lexer {
                     break;
                 };
 
-                match self.token(rest) {
+                match self.token(rest, interner) {
                     Some(pair) => {
                         rest = pair.0;
                         tokens.push(pair.1)
@@ -170,37 +173,53 @@ impl Lexer {
 
 #[cfg(test)]
 mod tests {
+    use misp_num::decimal::Decimal;
+
     use super::*;
+
+    macro_rules! assert_ident {
+        ($token: expr, $interner: expr, $str: expr) => {
+            if let Token::Ident(id) = $token {
+                assert!($interner.get_string(id).is_some_and(|str| str == $str))
+            } else {
+                panic!()
+            }
+        };
+    }
 
     #[test]
     fn test_basic_addition() {
+        let mut interner = Interner::default();
         let mut lexer = Lexer::default();
-        let input = "(+ 10 4)";
-        let tokens = lexer.lex(input).unwrap();
 
-        let mut kinds = tokens.iter();
-        assert_eq!(kinds.next().unwrap(), &Token::LeftParen);
-        assert_eq!(kinds.next().unwrap(), &Token::Ident("+".to_string()));
-        assert_eq!(kinds.next().unwrap(), &Token::Decimal(Decimal::from(10)));
-        assert_eq!(kinds.next().unwrap(), &Token::Decimal(Decimal::from(4)));
-        assert_eq!(kinds.next().unwrap(), &Token::RightParen);
+        let input = "(+ 10 4)";
+        let tokens = lexer.lex(input, &mut interner).unwrap();
+
+        let mut kinds = tokens.into_iter();
+        assert_eq!(kinds.next().unwrap(), Token::LeftParen);
+        assert_ident!(kinds.next().unwrap(), interner, "+");
+        assert_eq!(kinds.next().unwrap(), Token::Decimal(Decimal::from(10)));
+        assert_eq!(kinds.next().unwrap(), Token::Decimal(Decimal::from(4)));
+        assert_eq!(kinds.next().unwrap(), Token::RightParen);
     }
 
     #[test]
     fn test_compound_math() {
+        let mut interner = Interner::default();
         let mut lexer = Lexer::default();
-        let input = "(+ (* 10 15) 4)";
-        let tokens = lexer.lex(input).unwrap();
 
-        let mut kinds = tokens.iter();
-        assert_eq!(kinds.next().unwrap(), &Token::LeftParen);
-        assert_eq!(kinds.next().unwrap(), &Token::Ident("+".to_string()));
-        assert_eq!(kinds.next().unwrap(), &Token::LeftParen);
-        assert_eq!(kinds.next().unwrap(), &Token::Ident("*".to_string()));
-        assert_eq!(kinds.next().unwrap(), &Token::Decimal(Decimal::from(10)));
-        assert_eq!(kinds.next().unwrap(), &Token::Decimal(Decimal::from(15)));
-        assert_eq!(kinds.next().unwrap(), &Token::RightParen);
-        assert_eq!(kinds.next().unwrap(), &Token::Decimal(Decimal::from(4)));
-        assert_eq!(kinds.next().unwrap(), &Token::RightParen);
+        let input = "(+ (* 10 15) 4)";
+        let tokens = lexer.lex(input, &mut interner).unwrap();
+
+        let mut kinds = tokens.into_iter();
+        assert_eq!(kinds.next().unwrap(), Token::LeftParen);
+        assert_ident!(kinds.next().unwrap(), interner, "+");
+        assert_eq!(kinds.next().unwrap(), Token::LeftParen);
+        assert_ident!(kinds.next().unwrap(), interner, "*");
+        assert_eq!(kinds.next().unwrap(), Token::Decimal(Decimal::from(10)));
+        assert_eq!(kinds.next().unwrap(), Token::Decimal(Decimal::from(15)));
+        assert_eq!(kinds.next().unwrap(), Token::RightParen);
+        assert_eq!(kinds.next().unwrap(), Token::Decimal(Decimal::from(4)));
+        assert_eq!(kinds.next().unwrap(), Token::RightParen);
     }
 }

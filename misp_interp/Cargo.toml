@@ -7,7 +7,10 @@ edition = "2024"
 misp_lexer = { path = "../misp_lexer" }
 misp_parser = { path = "../misp_parser" }
 misp_executor = { path = "../misp_executor" }
+misp_common = { path = "../misp_common" }
+misp_interner = { path = "../misp_interner" }
 thiserror.workspace = true
+itertools = { version = "0.14.0", default-features = false, features = [ "use_alloc" ] }
 
 [dev-dependencies]
 criterion.workspace = true

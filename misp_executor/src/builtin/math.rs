@@ -160,24 +160,9 @@ binary_comparison_op!(builtin_gte, >=);
 //     Ok(Value::Integer(left % right))
 // }
 
-// pub async fn builtin_sqrt_async(executor: *mut Executor) -> Result<Value, Error> {
-//     let executor = unsafe { &mut *executor };
-//     let value = executor.stack.pop().ok_or(Error::EmptyStack)?;
-
-//     eprintln!("Before Evaluating Sqrt Value");
-
-//     let Value::Decimal(evaluated) = executor.eval(value).await else {
-//         return Err(Error::InvalidType);
-//     };
-
-//     eprintln!("After Evaluating Sqrt Value: {evaluated:?}");
-
-//     Ok(Value::Decimal(evaluated.sqrt()))
-// }
-
-pub fn builtin_abs(executor: *mut Executor) -> NativeMispFuture {
+pub fn builtin_abs(executor_ptr: *mut Executor) -> NativeMispFuture {
     Box::pin(async move {
-        let executor = unsafe { &mut *executor };
+        let executor = unsafe { &mut *executor_ptr };
         arity_check!(executor, "abs", 1);
 
         let value = executor.stack.pop().ok_or(Error::EmptyStack)?;
