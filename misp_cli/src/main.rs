@@ -24,7 +24,14 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     Repl,
-    Eval { expression: String },
+    Eval {
+        expression: String,
+    },
+    Bench {
+        expression: String,
+        #[arg(short, long, default_value_t = 100)]
+        repeat: usize,
+    },
 }
 
 #[derive(Default)]
@@ -190,6 +197,16 @@ fn main() {
                         .join(", ")
                 ),
                 Err(err) => eprintln!("Error: {}", err),
+            }
+        }
+        Commands::Bench { expression, repeat } => {
+            let mut misp = Misp::default();
+
+            for _ in 0..repeat {
+                if let Err(err) = misp.eval(&expression) {
+                    eprintln!("Error: {}", err);
+                    break;
+                }
             }
         }
     }
