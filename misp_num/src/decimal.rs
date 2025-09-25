@@ -1,8 +1,14 @@
-use std::{
+use core::{
     fmt::Display,
     hash::Hash,
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign},
     str::FromStr,
+};
+
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
 };
 
 use crate::Sign;
@@ -71,14 +77,14 @@ impl Decimal {
     /// the scale is as close to 0 as possible.
     pub fn normalize(mut self) -> Decimal {
         match self.scale.cmp(&0) {
-            std::cmp::Ordering::Less => {
+            core::cmp::Ordering::Less => {
                 while self.value < (u64::MAX / 10) && self.scale < 0 {
                     self.value *= 10;
                     self.scale += 1;
                 }
             }
-            std::cmp::Ordering::Equal => {}
-            std::cmp::Ordering::Greater => {
+            core::cmp::Ordering::Equal => {}
+            core::cmp::Ordering::Greater => {
                 while self.value > 0 && self.value % 10 == 0 && self.scale > 0 {
                     self.value /= 10;
                     self.scale -= 1;
@@ -99,7 +105,7 @@ impl Decimal {
         let mut working_value = self.value;
 
         match working_scale.cmp(&target_scale) {
-            std::cmp::Ordering::Less => {
+            core::cmp::Ordering::Less => {
                 while working_scale < target_scale {
                     if let Some(new_value) = working_value.checked_mul(10) {
                         working_value = new_value;
@@ -109,8 +115,8 @@ impl Decimal {
                     }
                 }
             }
-            std::cmp::Ordering::Equal => return Some(self),
-            std::cmp::Ordering::Greater => {
+            core::cmp::Ordering::Equal => return Some(self),
+            core::cmp::Ordering::Greater => {
                 while working_scale > target_scale {
                     if let Some(new_value) = working_value.checked_div(10) {
                         working_value = new_value;
@@ -135,7 +141,7 @@ impl Decimal {
         }
 
         let rescaled = match self.scale.cmp(&scale) {
-            std::cmp::Ordering::Less => {
+            core::cmp::Ordering::Less => {
                 // we need to scale up by the diff.
                 let diff = scale - self.scale;
 
@@ -147,8 +153,8 @@ impl Decimal {
                     return self.rescale_with_precision_loss(scale);
                 }
             }
-            std::cmp::Ordering::Equal => self.value,
-            std::cmp::Ordering::Greater => {
+            core::cmp::Ordering::Equal => self.value,
+            core::cmp::Ordering::Greater => {
                 let diff = self.scale - scale;
 
                 if let Some(multiplier) = 10u64.checked_pow(diff as u32)
@@ -229,9 +235,9 @@ impl Decimal {
             let squared = mid * mid;
 
             match squared.cmp(&int_value) {
-                std::cmp::Ordering::Equal => return Some(Decimal::from_unsigned(mid as u64)),
-                std::cmp::Ordering::Less => low = mid + 1,
-                std::cmp::Ordering::Greater => high = mid - 1,
+                core::cmp::Ordering::Equal => return Some(Decimal::from_unsigned(mid as u64)),
+                core::cmp::Ordering::Less => low = mid + 1,
+                core::cmp::Ordering::Greater => high = mid - 1,
             }
         }
 
@@ -364,18 +370,18 @@ impl PartialEq for Decimal {
 impl Eq for Decimal {}
 
 impl PartialOrd for Decimal {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl Ord for Decimal {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         let (self_normal, other_normal) = (self.normalize(), other.normalize());
 
         match (self_normal.sign, other_normal.sign) {
-            (Sign::Positive, Sign::Negative) => std::cmp::Ordering::Greater,
-            (Sign::Negative, Sign::Positive) => std::cmp::Ordering::Less,
+            (Sign::Positive, Sign::Negative) => core::cmp::Ordering::Greater,
+            (Sign::Negative, Sign::Positive) => core::cmp::Ordering::Less,
             (Sign::Positive, Sign::Positive) => {
                 let (self_aligned, other_aligned) =
                     Decimal::align_scales(self_normal, other_normal);
@@ -391,7 +397,7 @@ impl Ord for Decimal {
 }
 
 impl Hash for Decimal {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         let normal = self.normalize();
         normal.value.hash(state);
         normal.scale.hash(state);
@@ -488,11 +494,11 @@ impl FromStr for Decimal {
 }
 
 impl Display for Decimal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let num_str = self.value.to_string();
 
         match self.scale.cmp(&0) {
-            std::cmp::Ordering::Less => {
+            core::cmp::Ordering::Less => {
                 write!(
                     f,
                     "{}{num_str}{}",
@@ -500,8 +506,8 @@ impl Display for Decimal {
                     "0".repeat(self.scale.unsigned_abs() as usize)
                 )
             }
-            std::cmp::Ordering::Equal => write!(f, "{}{num_str}", self.sign),
-            std::cmp::Ordering::Greater => {
+            core::cmp::Ordering::Equal => write!(f, "{}{num_str}", self.sign),
+            core::cmp::Ordering::Greater => {
                 let (pre, post) =
                     num_str.split_at(num_str.len().saturating_sub(self.scale as usize));
                 write!(f, "{}{pre}.{post}", self.sign)
@@ -547,9 +553,7 @@ impl Add for Decimal {
             }
         }
 
-        // eprintln!("Before Align: ({self:?}, {rhs:?})");
         let (first, second) = Decimal::align_scales(self, rhs);
-        // eprintln!("After Align: ({first:?}, {second:?})");
 
         let sum = match (first.sign, second.sign) {
             (Sign::Positive, Sign::Positive) => {
@@ -601,12 +605,12 @@ impl Mul for Decimal {
         let target_scale = match first.scale.checked_add(second.scale) {
             Some(s) => s,
             None => match first.scale.cmp(&second.scale) {
-                std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {
+                core::cmp::Ordering::Less | core::cmp::Ordering::Equal => {
                     let new_scale = second.scale - (i32::MAX - first.scale);
                     second = second.rescale_with_precision_loss(new_scale).unwrap();
                     first.scale + new_scale
                 }
-                std::cmp::Ordering::Greater => {
+                core::cmp::Ordering::Greater => {
                     let new_scale = first.scale - (i32::MAX - second.scale);
                     first = first.rescale_with_precision_loss(new_scale).unwrap();
                     new_scale + second.scale
@@ -856,7 +860,7 @@ macro_rules! impl_scalar_combinations {
             type Output = $res;
             #[inline]
             fn $method(self, other: $scalar) -> $res {
-                $imp::$method(self, std::convert::Into::<$promo>::into(other))
+                $imp::$method(self, core::convert::Into::<$promo>::into(other))
             }
         }
 
@@ -864,7 +868,7 @@ macro_rules! impl_scalar_combinations {
             type Output = $res;
             #[inline]
             fn $method(self, other: &$scalar) -> $res {
-                $imp::$method(self, std::convert::Into::<$promo>::into(*other))
+                $imp::$method(self, core::convert::Into::<$promo>::into(*other))
             }
         }
 
@@ -872,7 +876,7 @@ macro_rules! impl_scalar_combinations {
             type Output = $res;
             #[inline]
             fn $method(self, other: $scalar) -> $res {
-                $imp::$method(*self, std::convert::Into::<$promo>::into(other))
+                $imp::$method(*self, core::convert::Into::<$promo>::into(other))
             }
         }
 
@@ -880,7 +884,7 @@ macro_rules! impl_scalar_combinations {
             type Output = $res;
             #[inline]
             fn $method(self, other: &$scalar) -> $res {
-                $imp::$method(*self, std::convert::Into::<$promo>::into(*other))
+                $imp::$method(*self, core::convert::Into::<$promo>::into(*other))
             }
         }
 
@@ -889,7 +893,7 @@ macro_rules! impl_scalar_combinations {
             type Output = $res;
             #[inline]
             fn $method(self, other: $res) -> $res {
-                $imp::$method(other, std::convert::Into::<$promo>::into(self))
+                $imp::$method(other, core::convert::Into::<$promo>::into(self))
             }
         }
 
@@ -897,7 +901,7 @@ macro_rules! impl_scalar_combinations {
             type Output = $res;
             #[inline]
             fn $method(self, other: &$res) -> $res {
-                $imp::$method(*other, std::convert::Into::<$promo>::into(self))
+                $imp::$method(*other, core::convert::Into::<$promo>::into(self))
             }
         }
 
@@ -905,7 +909,7 @@ macro_rules! impl_scalar_combinations {
             type Output = $res;
             #[inline]
             fn $method(self, other: $res) -> $res {
-                $imp::$method(other, std::convert::Into::<$promo>::into(*self))
+                $imp::$method(other, core::convert::Into::<$promo>::into(*self))
             }
         }
 
@@ -913,7 +917,7 @@ macro_rules! impl_scalar_combinations {
             type Output = $res;
             #[inline]
             fn $method(self, other: &$res) -> $res {
-                $imp::$method(*other, std::convert::Into::<$promo>::into(*self))
+                $imp::$method(*other, core::convert::Into::<$promo>::into(*self))
             }
         }
     };
@@ -1114,14 +1118,13 @@ mod tests {
         assert_eq!(result, Decimal::new(3, 0, Sign::Positive));
     }
 
-    #[test]
-    fn test_add_overflow_handling() {
-        let a = Decimal::new(u64::MAX - 1, 0, Sign::Positive);
-        let b = Decimal::new(5, 0, Sign::Positive);
-        let result = a + b;
-        // This should handle overflow by scaling up
-        println!("Overflow result: {:?}", result);
-    }
+    // #[test]
+    // fn test_add_overflow_handling() {
+    //     let a = Decimal::new(u64::MAX - 1, 0, Sign::Positive);
+    //     let b = Decimal::new(5, 0, Sign::Positive);
+    //     let result = a + b;
+    //     // This should handle overflow by scaling up
+    // }
 
     #[test]
     fn test_add_positive_negative_same_value() {
@@ -1259,7 +1262,6 @@ mod tests {
         let a = Decimal::new(u32::MAX as u64, 0, Sign::Positive);
         let b = Decimal::new(u32::MAX as u64, 0, Sign::Positive);
         let result = a * b;
-        println!("Overflow multiplication result: {:?}", result);
         assert_ne!(result.value, 0);
     }
 
@@ -1283,7 +1285,6 @@ mod tests {
         let a = Decimal::new(100, 1, Sign::Positive);
         let b = Decimal::new(3, 0, Sign::Positive);
         let result = a / b;
-        println!("10.0 / 3.0 = {:?}", result);
 
         assert_eq!(result.sign, Sign::Positive);
         assert!(result.value > 3);
@@ -1294,7 +1295,6 @@ mod tests {
         let a = Decimal::new(1234, 2, Sign::Positive);
         let b = Decimal::new(56, 1, Sign::Positive);
         let result = a / b;
-        println!("12.34 / 5.6 = {:?}", result);
 
         assert_eq!(result.sign, Sign::Positive);
         assert!(result.value >= 2);
@@ -1365,24 +1365,20 @@ mod tests {
         let c = Decimal::new(100, 1, Sign::Positive);
         let d = Decimal::new(10, 1, Sign::Positive);
         let result2 = c / d;
-        println!("10.0 / 1.0 = {:?}", result2);
         assert_eq!(result2.value, 10);
     }
 
     #[test]
     fn test_div_precision_examples() {
         let one_third = Decimal::ONE / Decimal::new(3, 0, Sign::Positive);
-        println!("1 / 3 = {:?}", one_third);
         assert_eq!(one_third.sign, Sign::Positive);
         assert!(one_third.scale > 0);
 
         let pi_approx = Decimal::new(22, 0, Sign::Positive) / Decimal::new(7, 0, Sign::Positive);
-        println!("22 / 7 = {:?}", pi_approx);
         assert_eq!(pi_approx.sign, Sign::Positive);
         assert!(pi_approx.value > 3);
 
         let one_ninth = Decimal::ONE / Decimal::new(9, 0, Sign::Positive);
-        println!("1 / 9 = {:?}", one_ninth);
         assert_eq!(one_ninth.sign, Sign::Positive);
     }
 

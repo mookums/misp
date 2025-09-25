@@ -1,3 +1,4 @@
+use alloc::boxed::Box;
 use misp_num::decimal::Decimal;
 
 use crate::{Error, Executor, NativeMispFuture, Value, arity_check};

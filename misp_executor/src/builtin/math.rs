@@ -1,6 +1,7 @@
+use alloc::{boxed::Box, vec, vec::Vec};
 use misp_num::{Sign, decimal::Decimal};
 
-use crate::{Error, Executor, NativeMispFuture, Value, arity_check};
+use crate::{Error, Executor, NativeMispFuture, Value, arity_check, quick_eval};
 use futures::join;
 
 const MAX_VARIADIC_ARGS: usize = 16;
@@ -23,19 +24,6 @@ macro_rules! binary_op {
                 }
 
                 let values = &mut values[..arity];
-                // for i in 0..arity {
-                //     let thunk = executor.stack.pop().unwrap();
-                //     values[i] = match thunk {
-                //         Value::Decimal(val) => val,
-                //         other => {
-                //             let Value::Decimal(val) = executor.eval(other).await? else {
-                //                 return Err(Error::InvalidType);
-                //             };
-                //             val
-                //         }
-                //     };
-                // }
-
                 for value in values.iter_mut() {
                     let thunk = executor.stack.pop().unwrap();
                     *value = match thunk {
@@ -53,6 +41,7 @@ macro_rules! binary_op {
                 for val in &values[1..arity] {
                     acc = Decimal::from(acc $op *val);
                 }
+
                 Ok(Value::Decimal(acc))
             })
         }
@@ -160,29 +149,12 @@ binary_comparison_op!(builtin_gte, >=);
 //     Ok(Value::Integer(left % right))
 // }
 
-// pub async fn builtin_sqrt_async(executor: *mut Executor) -> Result<Value, Error> {
-//     let executor = unsafe { &mut *executor };
-//     let value = executor.stack.pop().ok_or(Error::EmptyStack)?;
-
-//     eprintln!("Before Evaluating Sqrt Value");
-
-//     let Value::Decimal(evaluated) = executor.eval(value).await else {
-//         return Err(Error::InvalidType);
-//     };
-
-//     eprintln!("After Evaluating Sqrt Value: {evaluated:?}");
-
-//     Ok(Value::Decimal(evaluated.sqrt()))
-// }
-
 pub fn builtin_abs(executor: *mut Executor) -> NativeMispFuture {
     Box::pin(async move {
         let executor = unsafe { &mut *executor };
         arity_check!(executor, "abs", 1);
 
-        let value = executor.stack.pop().ok_or(Error::EmptyStack)?;
-
-        let Value::Decimal(mut evaluated) = executor.eval(value).await? else {
+        let Value::Decimal(mut evaluated) = quick_eval!(executor, Value::Decimal(_)) else {
             return Err(Error::InvalidType);
         };
 
@@ -258,9 +230,7 @@ pub fn builtin_sqrt(executor: *mut Executor) -> NativeMispFuture {
         let executor = unsafe { &mut *executor };
         arity_check!(executor, "sqrt", 1);
 
-        let value = executor.stack.pop().ok_or(Error::EmptyStack)?;
-
-        let Value::Decimal(evaluated) = executor.eval(value).await? else {
+        let Value::Decimal(evaluated) = quick_eval!(executor, Value::Decimal(_)) else {
             return Err(Error::InvalidType);
         };
 

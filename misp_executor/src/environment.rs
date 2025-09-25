@@ -1,5 +1,9 @@
-use std::collections::BTreeMap;
-
+use alloc::{
+    collections::btree_map::BTreeMap,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
 use misp_num::{Sign, decimal::Decimal};
 
 use crate::{Function, NativeMispFunction, Value};

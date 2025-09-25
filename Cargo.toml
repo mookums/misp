@@ -5,8 +5,9 @@ members = [
     "misp_num",
     "misp_executor",
     "misp_lexer",
-    "misp_parser"
-, "misp_interp"]
+    "misp_parser",
+    "misp_interp"
+]
 
 [workspace.dependencies]
 thiserror = "2.0.12"

@@ -1,5 +1,13 @@
-use std::{collections::VecDeque, fmt::Display};
+#![no_std]
+extern crate alloc;
 
+use core::fmt::Display;
+
+use alloc::{
+    collections::vec_deque::VecDeque,
+    string::{String, ToString},
+    vec::Vec,
+};
 use misp_lexer::Token;
 use misp_num::decimal::Decimal;
 
@@ -85,7 +93,7 @@ impl Parser {
 }
 
 impl Display for SExpr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             SExpr::Atom(s) => write!(f, "{}", s),
             SExpr::List(exprs) => {

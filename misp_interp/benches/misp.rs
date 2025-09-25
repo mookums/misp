@@ -4,6 +4,10 @@ use misp_interp::Misp;
 fn criterion_benchmark(c: &mut Criterion) {
     let mut misp = Misp::default();
 
+    c.bench_function("interp basic number", |b| {
+        b.iter(|| misp.eval("0").unwrap());
+    });
+
     c.bench_function("interp basic add", |b| {
         b.iter(|| misp.eval("(+ 10 10)").unwrap());
     });
@@ -30,6 +34,10 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     c.bench_function("interp sqrt operation", |b| {
         b.iter(|| misp.eval("(sqrt 10)").unwrap());
+    });
+
+    c.bench_function("interp perfect sqrt operation", |b| {
+        b.iter(|| misp.eval("(sqrt 157772167)").unwrap());
     });
 
     c.bench_function("interp power operation", |b| {

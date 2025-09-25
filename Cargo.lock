@@ -603,6 +603,7 @@ dependencies = [
 name = "misp_executor"
 version = "0.1.0"
 dependencies = [
+ "fnv",
  "futures",
  "misp_num",
  "misp_parser",

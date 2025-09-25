@@ -1,3 +1,10 @@
+#![no_std]
+extern crate alloc;
+
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 use misp_num::decimal::Decimal;
 use thiserror::Error;
 

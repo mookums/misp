@@ -22,6 +22,8 @@ macro_rules! arity_check {
 
         let arity_int = arity.to_u128() as usize;
         if arity_int != $expected {
+            use alloc::string::ToString;
+
             return Err(Error::FunctionArity {
                 name: $name.to_string(),
                 expected: $expected,
@@ -29,4 +31,15 @@ macro_rules! arity_check {
             });
         }
     };
+}
+
+#[macro_export]
+macro_rules! quick_eval {
+    ($e:ident, $pat:pat) => {{
+        let val = $e.stack.pop().ok_or(Error::EmptyStack)?;
+        match val {
+            $pat => val,
+            _ => $e.eval(val).await?,
+        }
+    }};
 }

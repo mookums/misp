@@ -1,13 +1,23 @@
+#![no_std]
+extern crate alloc;
+
 mod builtin;
 pub mod config;
 pub mod environment;
 pub mod future;
 
-use std::{
+use alloc::{
+    boxed::Box,
     collections::{BTreeMap, VecDeque},
-    hash::{DefaultHasher, Hash, Hasher},
-    pin::{Pin, pin},
     rc::Rc,
+    string::String,
+    vec::Vec,
+};
+use fnv::FnvHasher;
+
+use core::{
+    hash::{Hash, Hasher},
+    pin::{Pin, pin},
     task::{Context, Poll, Waker},
 };
 
@@ -351,7 +361,7 @@ impl Executor {
             }
             Instruction::Marker(_) => {}
             Instruction::MemoCheck { id, params } => {
-                let mut hasher = DefaultHasher::default();
+                let mut hasher = FnvHasher::default();
                 for param in params.iter() {
                     let value = self.env.get(param).unwrap();
                     value.hash(&mut hasher);
@@ -374,7 +384,7 @@ impl Executor {
                 }
             }
             Instruction::MemoStore { id, params } => {
-                let mut hasher = DefaultHasher::default();
+                let mut hasher = FnvHasher::default();
                 for param in params.iter() {
                     let value = self.env.get(param).unwrap();
                     value.hash(&mut hasher);

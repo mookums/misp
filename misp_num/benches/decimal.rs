@@ -1,6 +1,6 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use misp_num::decimal::Decimal;
-use std::hint::black_box;
+use std::{hint::black_box, str::FromStr};
 
 fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("basic add", |b| {
@@ -25,6 +25,10 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     c.bench_function("pi sqrt", |b| {
         b.iter(|| Decimal::PI.sqrt());
+    });
+
+    c.bench_function("basic from_str", |b| {
+        b.iter(|| Decimal::from_str(black_box("0")));
     });
 }
 

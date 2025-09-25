@@ -1,6 +1,7 @@
 use crate::{
     Error, Executor, Function, Lambda, NativeMispFuture, RuntimeMispFunction, Value, arity_check,
 };
+use alloc::{boxed::Box, vec::Vec};
 
 pub fn builtin_func(executor: *mut Executor) -> NativeMispFuture {
     Box::pin(async move {

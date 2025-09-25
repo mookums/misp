@@ -1,4 +1,4 @@
-use std::{
+use core::{
     pin::Pin,
     task::{Poll, Waker},
 };
@@ -19,7 +19,7 @@ pub struct EvalFuture {
 impl Future for EvalFuture {
     type Output = Result<Value, Error>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> Poll<Self::Output> {
         let fut = self.get_mut();
         let executor = unsafe { &mut *fut.executor };
 
