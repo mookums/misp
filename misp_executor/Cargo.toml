@@ -9,4 +9,5 @@ fnv = { version = "1.0.7", default-features = false }
 
 misp_parser = { path = "../misp_parser" }
 misp_num = { path = "../misp_num" }
+compact_str.workspace = true
 thiserror.workspace = true

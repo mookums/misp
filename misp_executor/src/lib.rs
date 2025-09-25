@@ -13,6 +13,7 @@ use alloc::{
     string::String,
     vec::Vec,
 };
+use compact_str::CompactString;
 use fnv::FnvHasher;
 use futures::FutureExt;
 
@@ -43,7 +44,7 @@ use crate::{
 
 #[derive(Debug, Clone, Hash)]
 pub struct Lambda {
-    pub params: Vec<String>,
+    pub params: Vec<CompactString>,
     pub body: Box<Value>,
 }
 
@@ -53,7 +54,7 @@ type NativeMispFunction = fn(*mut Executor) -> NativeMispFuture;
 #[derive(Debug, Clone, Hash)]
 pub struct RuntimeMispFunction {
     pub id: usize,
-    pub params: Rc<Vec<String>>,
+    pub params: Rc<Vec<CompactString>>,
     pub body: Rc<Value>,
 }
 
@@ -66,7 +67,7 @@ pub enum Function {
 
 #[derive(Debug, Clone, Hash)]
 pub enum Value {
-    Atom(String),
+    Atom(CompactString),
     List(Vec<Value>),
     Decimal(Decimal),
     Function(Function),
@@ -91,8 +92,8 @@ pub struct MemoKey {
 #[derive(Debug, Clone)]
 pub enum Instruction {
     Push(Value),
-    Store(String),
-    Load(String),
+    Store(CompactString),
+    Load(CompactString),
     Call(usize),
     PushScope,
     PushDefinedScope(Scope),
@@ -100,14 +101,20 @@ pub enum Instruction {
     Resume(usize),
     Await(usize),
     Marker(usize),
-    MemoCheck { id: usize, params: Rc<Vec<String>> },
-    MemoStore { id: usize, params: Rc<Vec<String>> },
+    MemoCheck {
+        id: usize,
+        params: Rc<Vec<CompactString>>,
+    },
+    MemoStore {
+        id: usize,
+        params: Rc<Vec<CompactString>>,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Unknown Symbol: {0}")]
-    UnknownSymbol(String),
+    UnknownSymbol(CompactString),
     #[error("Invalid Function Call")]
     FunctionCall,
     #[error("Wrong arity for '{name}': expected {expected}, got {actual}")]

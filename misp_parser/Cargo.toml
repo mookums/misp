@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 misp_num = { path = "../misp_num" }
 
+compact_str.workspace = true
 thiserror.workspace = true

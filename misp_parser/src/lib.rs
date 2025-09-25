@@ -7,6 +7,7 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
+use compact_str::CompactString;
 use misp_num::decimal::Decimal;
 
 #[derive(Debug, thiserror::Error)]
@@ -21,7 +22,7 @@ pub enum Error {
 
 #[derive(Debug, Clone)]
 pub enum SExpr {
-    Atom(String),
+    Atom(CompactString),
     List(Vec<SExpr>),
     Decimal(Decimal),
 }
@@ -108,7 +109,7 @@ impl<'a> Parser<'a> {
                     return Ok(SExpr::Decimal(decimal));
                 }
 
-                Ok(SExpr::Atom(token.to_string()))
+                Ok(SExpr::Atom(token.into()))
             }
             None => Err(Error::UnexpectedEof),
         }
@@ -391,7 +392,7 @@ mod tests {
     #[test]
     fn test_display_formatting() {
         // Test atom display
-        let atom = SExpr::Atom("hello".to_string());
+        let atom = SExpr::Atom("hello".into());
         assert_eq!(format!("{}", atom), "hello");
 
         // Test decimal display
@@ -400,7 +401,7 @@ mod tests {
 
         // Test list display
         let list = SExpr::List(vec![
-            SExpr::Atom("+".to_string()),
+            SExpr::Atom("+".into()),
             SExpr::Decimal(Decimal::from(1)),
             SExpr::Decimal(Decimal::from(2)),
         ]);
@@ -408,9 +409,9 @@ mod tests {
 
         // Test nested list display
         let nested = SExpr::List(vec![
-            SExpr::Atom("+".to_string()),
+            SExpr::Atom("+".into()),
             SExpr::List(vec![
-                SExpr::Atom("*".to_string()),
+                SExpr::Atom("*".into()),
                 SExpr::Decimal(Decimal::from(2)),
                 SExpr::Decimal(Decimal::from(3)),
             ]),
