@@ -489,26 +489,41 @@ impl Executor {
     }
 
     pub fn execute(&mut self, value: Value) -> Result<Value, Error> {
-        self.instructions.clear();
-        self.stack.clear();
         self.memos.clear();
 
-        let future = self.eval(value);
-        let mut main_future = pin!(future);
-        let mut context = Context::from_waker(self.waker);
-
-        loop {
-            while let Some(instruction) = self.instructions.pop_front() {
-                self.execute_instruction(instruction)?;
-            }
-
-            match main_future.as_mut().poll(&mut context) {
-                Poll::Ready(result) => {
-                    let result = result?;
+        match value {
+            Value::Atom(name) => {
+                if let Some(val) = self.env.get(&name) {
+                    let result = val.clone();
                     self.env.set_prev(result.clone());
-                    return Ok(result);
+                    Ok(result)
+                } else {
+                    Err(Error::UnknownSymbol(name))
                 }
-                Poll::Pending => continue,
+            }
+            Value::Decimal(_) => {
+                self.env.set_prev(value.clone());
+                Ok(value)
+            }
+            _ => {
+                let future = self.eval(value);
+                let mut main_future = pin!(future);
+                let mut context = Context::from_waker(self.waker);
+
+                loop {
+                    while let Some(instruction) = self.instructions.pop_front() {
+                        self.execute_instruction(instruction)?;
+                    }
+
+                    match main_future.as_mut().poll(&mut context) {
+                        Poll::Ready(result) => {
+                            let result = result?;
+                            self.env.set_prev(result.clone());
+                            return Ok(result);
+                        }
+                        Poll::Pending => continue,
+                    }
+                }
             }
         }
     }
