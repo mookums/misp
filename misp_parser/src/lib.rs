@@ -38,16 +38,19 @@ impl<'a> Parser<'a> {
         Self { input, position: 0 }
     }
 
+    #[inline(always)]
     fn peek(&mut self) -> Option<char> {
         self.input[self.position..].chars().next()
     }
 
+    #[inline(always)]
     fn advance(&mut self) {
         if let Some(char) = self.peek() {
             self.position += char.len_utf8();
         }
     }
 
+    #[inline]
     fn skip_whitespace(&mut self) {
         while let Some(ch) = self.peek() {
             if ch.is_ascii_whitespace() {

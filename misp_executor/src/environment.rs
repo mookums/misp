@@ -1,16 +1,13 @@
-use alloc::{
-    collections::btree_map::BTreeMap,
-    string::{String, ToString},
-    vec,
-    vec::Vec,
-};
+use alloc::{vec, vec::Vec};
+use compact_str::{CompactString, ToCompactString};
+use hashbrown::HashMap;
 use misp_num::{Sign, decimal::Decimal};
 
 use crate::{Function, NativeMispFunction, Value};
 
 #[derive(Debug, Default, Clone)]
 pub struct Scope {
-    pub bindings: BTreeMap<String, Value>,
+    pub bindings: HashMap<CompactString, Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -94,34 +91,35 @@ impl Environment {
         self.scopes.pop();
     }
 
-    pub fn define_native_function(&mut self, name: impl ToString, f: NativeMispFunction) {
-        self.current_scope_mut()
-            .bindings
-            .insert(name.to_string(), Value::Function(Function::Native(f)));
+    pub fn define_native_function(&mut self, name: impl ToCompactString, f: NativeMispFunction) {
+        self.current_scope_mut().bindings.insert(
+            name.to_compact_string(),
+            Value::Function(Function::Native(f)),
+        );
     }
 
     pub fn set_prev(&mut self, value: Value) {
         self.current_scope_mut()
             .bindings
-            .insert("prev".to_string(), value);
+            .insert("prev".into(), value);
     }
 
-    pub fn set(&mut self, name: impl ToString, value: Value) {
+    pub fn set(&mut self, name: impl ToCompactString, value: Value) {
         self.current_scope_mut()
             .bindings
-            .insert(name.to_string(), value);
+            .insert(name.to_compact_string(), value);
     }
 
-    pub fn set_global(&mut self, name: impl ToString, value: Value) {
+    pub fn set_global(&mut self, name: impl ToCompactString, value: Value) {
         self.global_scope_mut()
             .bindings
-            .insert(name.to_string(), value);
+            .insert(name.to_compact_string(), value);
     }
 
-    pub fn get(&self, name: impl AsRef<str>) -> Option<&Value> {
+    pub fn get(&self, name: &CompactString) -> Option<&Value> {
         // Searches from the current scope up, trying to match the variable.
         for scope in self.scopes.iter().rev() {
-            if let Some(value) = scope.bindings.get(name.as_ref()) {
+            if let Some(value) = scope.bindings.get(name) {
                 return Some(value);
             }
         }

@@ -6,16 +6,11 @@ pub mod config;
 pub mod environment;
 pub mod future;
 
-use alloc::{
-    boxed::Box,
-    collections::{BTreeMap, VecDeque},
-    rc::Rc,
-    string::String,
-    vec::Vec,
-};
+use alloc::{boxed::Box, collections::VecDeque, rc::Rc, string::String, vec::Vec};
 use compact_str::CompactString;
 use fnv::FnvHasher;
 use futures::FutureExt;
+use hashbrown::HashMap;
 
 use core::{
     hash::{Hash, Hasher},
@@ -83,7 +78,7 @@ impl From<SExpr> for Value {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MemoKey {
     pub id: usize,
     pub args_hash: u64,
@@ -144,6 +139,7 @@ impl<'a> Injector<'a> {
         }
     }
 
+    #[inline(always)]
     pub fn inject(&mut self, instruction: Instruction) {
         self.instructions.insert(self.index, instruction);
         self.index += 1;
@@ -156,12 +152,12 @@ pub struct Executor {
     pub instructions: VecDeque<Instruction>,
     pub stack: Vec<Value>,
 
-    pub memos: BTreeMap<MemoKey, Value>,
+    pub memos: HashMap<MemoKey, Value>,
     pub next_function_id: usize,
 
     pub waker: &'static Waker,
-    pub futures: BTreeMap<usize, EvalFutureContext>,
-    pub native_futures: BTreeMap<usize, NativeMispFuture>,
+    pub futures: HashMap<usize, EvalFutureContext>,
+    pub native_futures: HashMap<usize, NativeMispFuture>,
     pub next_future_id: usize,
 }
 
@@ -220,10 +216,10 @@ impl Default for Executor {
             instructions: VecDeque::default(),
             stack: Vec::default(),
             next_function_id: 0,
-            memos: BTreeMap::default(),
+            memos: HashMap::default(),
             waker: Waker::noop(),
-            futures: BTreeMap::default(),
-            native_futures: BTreeMap::default(),
+            futures: HashMap::default(),
+            native_futures: HashMap::default(),
             next_future_id: 0,
         }
     }
