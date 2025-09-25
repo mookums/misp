@@ -616,16 +616,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "misp_executor",
- "misp_lexer",
  "misp_parser",
- "thiserror",
-]
-
-[[package]]
-name = "misp_lexer"
-version = "0.1.0"
-dependencies = [
- "misp_num",
  "thiserror",
 ]
 
@@ -640,7 +631,6 @@ dependencies = [
 name = "misp_parser"
 version = "0.1.0"
 dependencies = [
- "misp_lexer",
  "misp_num",
  "thiserror",
 ]

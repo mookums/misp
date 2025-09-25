@@ -4,7 +4,6 @@ members = [
     "misp_cli",
     "misp_num",
     "misp_executor",
-    "misp_lexer",
     "misp_parser",
     "misp_interp"
 ]
