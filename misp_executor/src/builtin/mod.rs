@@ -35,11 +35,14 @@ macro_rules! arity_check {
 
 #[macro_export]
 macro_rules! quick_eval {
-    ($e:ident, $pat:pat) => {{
+    ($e:ident, $pat:ident) => {{
         let val = $e.stack.pop().ok_or(Error::EmptyStack)?;
         match val {
-            $pat => val,
-            _ => $e.eval(val).await?,
+            Value::$pat(inner_val) => inner_val,
+            _ => match $e.eval(val).await? {
+                Value::$pat(inner_val) => inner_val,
+                _ => return Err(Error::InvalidType),
+            },
         }
     }};
 }

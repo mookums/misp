@@ -331,14 +331,18 @@ impl Executor {
     }
 
     fn execute_instruction(self: &mut Executor, instruction: Instruction) -> Result<(), Error> {
-        // eprintln!("Current Instruction: {instruction:?}");
-        // eprintln!("Instructions: {:?}", self.instructions);
-        // eprintln!("Memos: {:?}", self.memos);
-        // eprintln!("Stack: {:?}", self.stack);
-        // eprintln!("Futures: {:?}", self.futures);
-        // eprintln!("Native Futures: {:?}", self.native_futures.keys());
-        // eprintln!();
-        // std::thread::sleep(std::time::Duration::from_secs(1));
+        // {
+        //     extern crate std;
+        //     use std::eprintln;
+        //     eprintln!("Current Instruction: {instruction:?}");
+        //     eprintln!("Instructions: {:?}", self.instructions);
+        //     eprintln!("Memos: {:?}", self.memos.keys());
+        //     eprintln!("Stack: {:?}", self.stack);
+        //     eprintln!("Futures: {:?}", self.futures.keys());
+        //     eprintln!("Native Futures: {:?}", self.native_futures.keys());
+        //     eprintln!();
+        //     std::thread::sleep(std::time::Duration::from_secs(1));
+        // }
 
         match instruction {
             Instruction::Push(value) => {

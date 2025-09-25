@@ -1,22 +1,19 @@
 use alloc::boxed::Box;
 use misp_num::decimal::Decimal;
 
-use crate::{Error, Executor, NativeMispFuture, Value, arity_check};
+use crate::{Error, Executor, NativeMispFuture, Value, arity_check, quick_eval};
 
 pub fn builtin_if(executor: *mut Executor) -> NativeMispFuture {
     Box::pin(async move {
         let executor = unsafe { &mut *executor };
         arity_check!(executor, "if", 3);
 
-        let (else_thunk, then_thunk, condition_thunk) = (
-            executor.stack.pop().ok_or(Error::EmptyStack)?,
+        let (else_thunk, then_thunk) = (
             executor.stack.pop().ok_or(Error::EmptyStack)?,
             executor.stack.pop().ok_or(Error::EmptyStack)?,
         );
 
-        let Value::Decimal(condition) = executor.eval(condition_thunk).await? else {
-            return Err(Error::InvalidType);
-        };
+        let condition = quick_eval!(executor, Decimal);
 
         let next = if condition == Decimal::ONE {
             executor.eval(then_thunk).await?

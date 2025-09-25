@@ -2,7 +2,6 @@ use alloc::{boxed::Box, vec, vec::Vec};
 use misp_num::{Sign, decimal::Decimal};
 
 use crate::{Error, Executor, NativeMispFuture, Value, arity_check, quick_eval};
-use futures::join;
 
 const MAX_VARIADIC_ARGS: usize = 16;
 
@@ -24,7 +23,7 @@ macro_rules! binary_op {
                 }
 
                 let values = &mut values[..arity];
-                for value in values.iter_mut() {
+                for value in values.iter_mut().rev() {
                     let thunk = executor.stack.pop().unwrap();
                     *value = match thunk {
                         Value::Decimal(val) => val,
@@ -154,9 +153,7 @@ pub fn builtin_abs(executor: *mut Executor) -> NativeMispFuture {
         let executor = unsafe { &mut *executor };
         arity_check!(executor, "abs", 1);
 
-        let Value::Decimal(mut evaluated) = quick_eval!(executor, Value::Decimal(_)) else {
-            return Err(Error::InvalidType);
-        };
+        let mut evaluated = quick_eval!(executor, Decimal);
 
         evaluated.sign = Sign::Positive;
         Ok(Value::Decimal(evaluated))
@@ -230,9 +227,7 @@ pub fn builtin_sqrt(executor: *mut Executor) -> NativeMispFuture {
         let executor = unsafe { &mut *executor };
         arity_check!(executor, "sqrt", 1);
 
-        let Value::Decimal(evaluated) = quick_eval!(executor, Value::Decimal(_)) else {
-            return Err(Error::InvalidType);
-        };
+        let evaluated = quick_eval!(executor, Decimal);
 
         Ok(Value::Decimal(evaluated.sqrt()))
     })
@@ -243,16 +238,8 @@ pub fn builtin_pow(executor: *mut Executor) -> NativeMispFuture {
         let executor = unsafe { &mut *executor };
         arity_check!(executor, "pow", 2);
 
-        let (pow_thunk, base_thunk) = (
-            executor.stack.pop().ok_or(Error::EmptyStack)?,
-            executor.stack.pop().ok_or(Error::EmptyStack)?,
-        );
-
-        let (pow, base) = join!(executor.eval(pow_thunk), executor.eval(base_thunk));
-
-        let (Value::Decimal(pow), Value::Decimal(base)) = (pow?, base?) else {
-            return Err(Error::InvalidType);
-        };
+        let pow = quick_eval!(executor, Decimal);
+        let base = quick_eval!(executor, Decimal);
 
         Ok(Value::Decimal(base.pow(pow)))
     })
@@ -263,23 +250,9 @@ pub fn builtin_summate(executor: *mut Executor) -> NativeMispFuture {
         let executor = unsafe { &mut *executor };
         arity_check!(executor, "summate", 3);
 
-        let (func, end, start) = (
-            executor.stack.pop().ok_or(Error::EmptyStack)?,
-            executor.stack.pop().ok_or(Error::EmptyStack)?,
-            executor.stack.pop().ok_or(Error::EmptyStack)?,
-        );
-
-        let (start, end, func) = join!(
-            executor.eval(start),
-            executor.eval(end),
-            executor.eval(func),
-        );
-
-        let (Value::Decimal(start), Value::Decimal(end), Value::Function(f)) =
-            (start?, end?, func?)
-        else {
-            return Err(Error::InvalidType);
-        };
+        let func = quick_eval!(executor, Function);
+        let end = quick_eval!(executor, Decimal);
+        let start = quick_eval!(executor, Decimal);
 
         let mut start = start.to_u128() as u64;
         let end = end.to_u128() as u64;
@@ -288,7 +261,7 @@ pub fn builtin_summate(executor: *mut Executor) -> NativeMispFuture {
         while start <= end {
             let current_decimal = Value::Decimal(Decimal::from(start));
             let result = executor
-                .run_function(f.clone(), vec![current_decimal])
+                .run_function(func.clone(), vec![current_decimal])
                 .await?;
             let Value::Decimal(result_decimal) = result else {
                 return Err(Error::InvalidType);

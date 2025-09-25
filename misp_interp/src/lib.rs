@@ -30,11 +30,6 @@ impl Misp {
             .collect::<Result<Vec<Value>, misp_executor::Error>>()?)
     }
 
-    // pub fn eval_to_string(&mut self, input: impl AsRef<str>) -> Result<String, Error> {
-    //     let value = self.eval(input)?;
-    //     Ok(Self::print(&value))
-    // }
-
     pub fn print(value: &Value) -> String {
         match value {
             Value::Atom(s) => s.to_string(),
