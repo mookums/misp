@@ -270,8 +270,19 @@ impl Executor {
         }
     }
 
-    pub fn execute(&mut self, value: Value) -> Result<Value, Error> {
+    fn full_reset(&mut self) {
+        self.next_future_id = 0;
+        self.next_function_id = 0;
+        self.ready_future = 0;
+
+        self.native_futures.clear();
+        self.futures.clear();
+        self.stack.clear();
         self.memos.clear();
+    }
+
+    pub fn execute(&mut self, value: Value) -> Result<Value, Error> {
+        self.full_reset();
 
         match value {
             Value::Atom(name) => {
