@@ -14,12 +14,12 @@ macro_rules! binary_op {
 
                 let Value::Decimal(arg_count) = executor.stack.pop().ok_or(Error::EmptyStack)?
                 else {
-                    return Err(Error::InvalidType);
+                    panic!("arity is not decimal")
                 };
 
                 let arity = arg_count.to_u128() as usize;
                 if arity == 0 {
-                    return Err(Error::InvalidType);
+                    panic!("arity is 0")
                 }
 
                 let values = &mut values[..arity];
@@ -28,7 +28,8 @@ macro_rules! binary_op {
                     *value = match thunk {
                         Value::Decimal(val) => val,
                         other => {
-                            let Value::Decimal(val) = executor.eval(other).await? else {
+                            let evaluated = executor.force_eval(other).await?;
+                            let Value::Decimal(val) = evaluated else {
                                 return Err(Error::InvalidType);
                             };
                             val

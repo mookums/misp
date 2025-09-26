@@ -46,35 +46,35 @@ pub fn builtin_func(executor: *mut Executor) -> NativeMispFuture {
     })
 }
 
-pub fn builtin_lambda(executor: *mut Executor) -> NativeMispFuture {
-    Box::pin(async move {
-        let executor = unsafe { &mut *executor };
-        arity_check!(executor, "lamdba", 2);
+// pub fn builtin_lambda(executor: *mut Executor) -> NativeMispFuture {
+//     Box::pin(async move {
+//         let executor = unsafe { &mut *executor };
+//         arity_check!(executor, "lamdba", 2);
 
-        let (body, params_thunk) = (
-            executor.stack.pop().ok_or(Error::EmptyStack)?,
-            executor.stack.pop().ok_or(Error::EmptyStack)?,
-        );
+//         let (body, params_thunk) = (
+//             executor.stack.pop().ok_or(Error::EmptyStack)?,
+//             executor.stack.pop().ok_or(Error::EmptyStack)?,
+//         );
 
-        let params = match params_thunk {
-            Value::List(param_list) => {
-                let mut params = Vec::new();
-                for param in param_list {
-                    match param {
-                        Value::Atom(p) => params.push(p),
-                        _ => return Err(Error::FunctionCall),
-                    }
-                }
-                params
-            }
-            _ => return Err(Error::FunctionCall),
-        };
+//         let params = match params_thunk {
+//             Value::List(param_list) => {
+//                 let mut params = Vec::new();
+//                 for param in param_list {
+//                     match param {
+//                         Value::Atom(p) => params.push(p),
+//                         _ => return Err(Error::FunctionCall),
+//                     }
+//                 }
+//                 params
+//             }
+//             _ => return Err(Error::FunctionCall),
+//         };
 
-        let lambda = Value::Function(Function::Lambda(Lambda {
-            params,
-            body: Box::new(body),
-        }));
+//         let lambda = Value::Function(Function::Lambda(Lambda {
+//             params,
+//             body: Box::new(body),
+//         }));
 
-        Ok(lambda)
-    })
-}
+//         Ok(lambda)
+//     })
+// }

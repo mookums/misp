@@ -1,6 +1,6 @@
 // pub mod combinatorics;
 // pub mod control;
-// pub mod func;
+pub mod func;
 pub mod math;
 // pub mod trig;
 

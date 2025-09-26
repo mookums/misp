@@ -9,7 +9,7 @@ pub mod future;
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 use compact_str::CompactString;
 use futures::FutureExt;
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 
 use core::{
     hash::Hash,
@@ -21,10 +21,13 @@ use misp_num::decimal::Decimal;
 use misp_parser::SExpr;
 
 use crate::{
-    builtin::math::{
-        builtin_abs, builtin_add, builtin_divide, builtin_equal, builtin_gt, builtin_gte,
-        builtin_lt, builtin_lte, builtin_minus, builtin_multiply, builtin_not_equal, builtin_pow,
-        builtin_sqrt,
+    builtin::{
+        func::builtin_func,
+        math::{
+            builtin_abs, builtin_add, builtin_divide, builtin_equal, builtin_gt, builtin_gte,
+            builtin_lt, builtin_lte, builtin_minus, builtin_multiply, builtin_not_equal,
+            builtin_pow, builtin_sqrt,
+        },
     },
     config::Config,
     environment::Environment,
@@ -96,6 +99,8 @@ pub enum Error {
     InvalidType,
     #[error("Empty Stack")]
     EmptyStack,
+    #[error("Cyclic Reference")]
+    CyclicReference,
 }
 
 pub struct Executor {
@@ -124,7 +129,7 @@ impl Default for Executor {
         env.load_constants();
 
         // Functions
-        // env.define_native_function("func", builtin_func);
+        env.define_native_function("func", builtin_func);
         // env.define_native_function("lambda", builtin_lambda);
 
         // Control Functions
@@ -256,8 +261,25 @@ impl Executor {
                             }
                         }
                     }
-                    Function::Runtime(rt) => todo!(),
-                    Function::Lambda(l) => todo!(),
+                    Function::Runtime(rt) => {
+                        let arity: u64 = rt.params.len() as u64;
+                        // TODO: validate arity.
+                        _ = arity;
+
+                        let last_future = self.current_future;
+                        self.current_future = Some(future_id);
+
+                        for (param, value) in rt.params.iter().rev().zip(values.into_iter().skip(1))
+                        {
+                            self.env.set(param, value);
+                        }
+
+                        let future = self.eval((*rt.body).clone());
+                        self.current_future = last_future;
+
+                        return future;
+                    }
+                    Function::Lambda(_) => todo!(),
                 }
             }
         };
@@ -267,6 +289,23 @@ impl Executor {
         EvalFuture {
             id: future_id,
             executor: self,
+        }
+    }
+
+    pub async fn force_eval(&mut self, value: Value) -> Result<Value, Error> {
+        let mut current = value;
+
+        loop {
+            match current {
+                Value::Atom(str) => {
+                    current = self.env.get(&str).ok_or(Error::UnknownSymbol(str))?.clone();
+                }
+                Value::List(_) => {
+                    let future = self.eval(current);
+                    current = future.await?;
+                }
+                Value::Decimal(_) | Value::Function(_) => return Ok(current),
+            }
         }
     }
 
@@ -300,7 +339,10 @@ impl Executor {
             }
             _ => {
                 let waker = Waker::noop();
+
                 let func_id = self.next_function_id;
+                self.next_function_id += 1;
+
                 self.futures.insert(
                     func_id,
                     EvalFutureContext {
@@ -308,15 +350,12 @@ impl Executor {
                         waker: Some(waker.clone()),
                     },
                 );
-                self.next_function_id += 1;
+
                 self.ready_future = func_id;
                 self.current_future = Some(func_id);
 
-                // we actually need to do computation.
                 let future = self.eval(value);
                 let mut main_future = pin!(future);
-
-                let mut context = Context::from_waker(waker);
 
                 loop {
                     // {
@@ -329,12 +368,14 @@ impl Executor {
                     //     eprintln!("Native Futures: {:?}", self.native_futures.keys());
                     //     eprintln!("Current Future: {:?}", self.current_future);
                     //     eprintln!("Ready Future: {:?}", self.ready_future);
+                    //     eprintln!("Environment: {:?}", self.env.current_scope().bindings);
                     //     eprintln!();
                     //     std::thread::sleep(std::time::Duration::from_secs(1));
                     // }
 
                     match self.ready_future {
                         ready if ready == func_id => {
+                            let mut context = Context::from_waker(waker);
                             match main_future.as_mut().poll(&mut context) {
                                 Poll::Ready(result) => {
                                     let result = result?;
