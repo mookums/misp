@@ -5,15 +5,6 @@ pub mod math;
 // pub mod trig;
 
 #[macro_export]
-macro_rules! async_builtin {
-    ($sync_name:ident, $async_name:ident) => {
-        pub fn $sync_name(executor: *mut Executor) -> NativeMispFuture {
-            Box::pin($async_name(executor))
-        }
-    };
-}
-
-#[macro_export]
 macro_rules! arity_check {
     ($e:ident, $name:expr, $expected:expr) => {
         let Value::Decimal(arity) = $e.stack.pop().unwrap() else {

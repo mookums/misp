@@ -1,17 +1,15 @@
-use alloc::{boxed::Box, vec, vec::Vec};
-use misp_num::{Sign, decimal::Decimal};
+use misp_num::Sign;
 
 use crate::{Error, Executor, Value, arity_check, quick_eval};
 
-const MAX_VARIADIC_ARGS: usize = 16;
+#[macro_export]
+macro_rules! variadic_op {
+    ($e:ident, $op:tt) => {
+        {
+            const MAX_VARIADIC_ARGS: usize = 16;
+            let mut values: [Decimal; MAX_VARIADIC_ARGS] = [const { Decimal::ZERO }; MAX_VARIADIC_ARGS];
 
-macro_rules! binary_op {
-    ($name:ident, $op:tt) => {
-        pub fn $name(executor: &mut Executor) -> Result<Value, Error> {
-            let mut values: [Decimal; MAX_VARIADIC_ARGS] = [const { Decimal::ZERO } ; MAX_VARIADIC_ARGS];
-
-            let Value::Decimal(arg_count) = executor.stack.pop().ok_or(Error::EmptyStack)?
-            else {
+            let Value::Decimal(arg_count) = $e.stack.pop().ok_or(Error::EmptyStack)? else {
                 return Err(Error::InvalidType);
             };
 
@@ -21,65 +19,53 @@ macro_rules! binary_op {
             }
 
             let values = &mut values[..arity];
-            for value in values.iter_mut().rev() {
-                let thunk = executor.stack.pop().unwrap();
+            let mut acc = values[0];
+
+            for value in values.iter_mut().skip(1).rev() {
+                let thunk = $e.stack.pop().unwrap();
                 *value = match thunk {
                     Value::Decimal(val) => val,
                     _ => return Err(Error::InvalidType),
                 };
+
+                acc += *value;
             }
 
-            let mut acc = values[0];
-            for val in &values[1..arity] {
-                acc = Decimal::from(acc $op *val);
-            }
-
-            Ok(Value::Decimal(acc))
+            $e.stack.push(Value::Decimal(acc));
         }
     };
 }
 
-macro_rules! binary_comparison_op {
-    ($name:ident, $op:tt) => {
-        pub fn $name(executor: &mut Executor) -> Result<Value, Error> {
-            let Value::Decimal(arg_count) = executor.stack.pop().ok_or(Error::EmptyStack)?
+#[macro_export]
+macro_rules! variadic_comparison {
+    ($e:expr, $op:tt) => {
+        {
+            let Value::Decimal(arg_count) = $e.stack.pop().ok_or(Error::EmptyStack)?
             else {
                 return Err(Error::InvalidType);
             };
 
             let count = arg_count.to_u128() as usize;
-
             let mut prev = None;
 
             for _ in 0..count {
-                let thunk = executor.stack.pop().ok_or(Error::EmptyStack)?;
+                let thunk = $e.stack.pop().ok_or(Error::EmptyStack)?;
 
                 let Value::Decimal(value) = thunk else {
                         return Err(Error::InvalidType);
                 };
 
                 if let Some(prev_value) = prev && Decimal::from(value $op prev_value) != Decimal::ONE {
-                        return Ok(Value::Decimal(Decimal::ZERO))
+                    $e.stack.push(Value::Decimal(Decimal::ZERO))
                 }
 
                 prev = Some(value)
             }
 
-            Ok(Value::Decimal(Decimal::ONE))
+            $e.stack.push(Value::Decimal(Decimal::ONE));
         }
     };
 }
-
-binary_op!(builtin_add, +);
-binary_op!(builtin_minus,-);
-binary_op!(builtin_multiply, *);
-binary_op!(builtin_divide, /);
-binary_comparison_op!(builtin_equal, ==);
-binary_comparison_op!(builtin_not_equal, !=);
-binary_comparison_op!(builtin_lt, <);
-binary_comparison_op!(builtin_lte, <=);
-binary_comparison_op!(builtin_gt, >);
-binary_comparison_op!(builtin_gte, >=);
 
 // pub fn builtin_mod(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
 //     if args.len() != 2 {

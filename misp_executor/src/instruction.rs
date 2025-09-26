@@ -11,18 +11,20 @@ pub enum Instruction {
     Load(CompactString),
     Call(Function),
     Return,
-    // CallNative(usize),
     PushScope,
     PushDefinedScope(Scope),
     PopScope,
-    // MemoCheck {
-    //     id: usize,
-    //     params: Rc<Vec<CompactString>>,
-    // },
-    // MemoStore {
-    //     id: usize,
-    //     params: Rc<Vec<CompactString>>,
-    // },
+    // Arith Instructions
+    Add,
+    Sub,
+    Mult,
+    Div,
+    Eq,
+    Neq,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
 }
 
 impl Display for Instruction {
@@ -38,4 +40,19 @@ impl Display for Instruction {
             _ => write!(f, "{self:?}"),
         }
     }
+}
+
+#[macro_export]
+macro_rules! variadic_instruction {
+    ($e: expr, $values: expr, $instr: ident) => {{
+        let arity = ($values.len() - 1) as u64;
+
+        for param in $values.into_iter().skip(1) {
+            $e.compile_self(param.clone())?;
+        }
+
+        $e.instructions
+            .push(Instruction::Push(Value::Decimal(arity.into())));
+        $e.instructions.push(Instruction::$instr);
+    }};
 }

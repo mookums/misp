@@ -26,11 +26,7 @@ use crate::{
     //         builtin_not_equal, builtin_pow, builtin_sqrt, builtin_summate,
     //     },
     // },
-    builtin::math::{
-        builtin_abs, builtin_add, builtin_divide, builtin_equal, builtin_gt, builtin_gte,
-        builtin_lt, builtin_lte, builtin_minus, builtin_multiply, builtin_not_equal, builtin_pow,
-        builtin_sqrt,
-    },
+    builtin::math::{builtin_abs, builtin_pow, builtin_sqrt},
     config::Config,
     environment::Environment,
     instruction::Instruction,
@@ -136,20 +132,14 @@ impl Default for Executor {
         // env.define_native_function("if", builtin_if);
 
         // Math Functions
-        env.define_native_function("+", builtin_add);
-        env.define_native_function("-", builtin_minus);
-        env.define_native_function("*", builtin_multiply);
-        env.define_native_function("/", builtin_divide);
+        // env.define_native_function("+", builtin_add);
+        // env.define_native_function("-", builtin_minus);
+        // env.define_native_function("*", builtin_multiply);
+        // env.define_native_function("/", builtin_divide);
         // env.define_native_function("%", builtin_mod);
-        env.define_native_function("==", builtin_equal);
-        env.define_native_function("!=", builtin_not_equal);
-        env.define_native_function("<", builtin_lt);
-        env.define_native_function("<=", builtin_lte);
-        env.define_native_function(">", builtin_gt);
-        env.define_native_function(">=", builtin_gte);
-        env.define_native_function("abs", builtin_abs);
         // env.define_native_function("min", builtin_min);
         // env.define_native_function("max", builtin_max);
+        env.define_native_function("abs", builtin_abs);
         env.define_native_function("pow", builtin_pow);
         env.define_native_function("sqrt", builtin_sqrt);
         // env.define_native_function("summate", builtin_summate);
@@ -236,6 +226,16 @@ impl Executor {
 
                             self.instructions.push(Instruction::Push(function));
                         }
+                        "+" => variadic_instruction!(self, values, Add),
+                        "-" => variadic_instruction!(self, values, Sub),
+                        "*" => variadic_instruction!(self, values, Mult),
+                        "/" => variadic_instruction!(self, values, Div),
+                        "==" => variadic_instruction!(self, values, Eq),
+                        "!=" => variadic_instruction!(self, values, Neq),
+                        ">" => variadic_instruction!(self, values, Gt),
+                        ">=" => variadic_instruction!(self, values, Gte),
+                        "<" => variadic_instruction!(self, values, Lt),
+                        "<=" => variadic_instruction!(self, values, Lte),
                         _ => {
                             let arity = (values.len() - 1) as u64;
 
@@ -321,7 +321,7 @@ impl Executor {
 
                     self.pc = *location;
                 }
-                Function::Lambda(lambda) => todo!(),
+                Function::Lambda(_) => todo!(),
             },
 
             Instruction::Return => {
@@ -338,6 +338,16 @@ impl Executor {
             Instruction::PopScope => {
                 self.env.pop_scope();
             }
+            Instruction::Add => variadic_op!(self, +),
+            Instruction::Sub => variadic_op!(self, -),
+            Instruction::Mult => variadic_op!(self, *),
+            Instruction::Div => variadic_op!(self, /),
+            Instruction::Eq => variadic_comparison!(self, ==),
+            Instruction::Neq => variadic_comparison!(self, !=),
+            Instruction::Gt => variadic_comparison!(self, >),
+            Instruction::Gte => variadic_comparison!(self, >=),
+            Instruction::Lt => variadic_comparison!(self, <),
+            Instruction::Lte => variadic_comparison!(self, <=),
         }
 
         Ok(())
@@ -394,6 +404,8 @@ impl Executor {
 
     pub fn execute(&mut self, value: Value) -> Result<Value, Error> {
         self.pc = 0;
+        self.next_function_id = 0;
+
         self.instructions.clear();
         self.frames.clear();
         self.function_location.clear();
