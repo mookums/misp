@@ -9,7 +9,7 @@ pub mod future;
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 use compact_str::CompactString;
 use futures::FutureExt;
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashMap;
 
 use core::{
     hash::Hash,
@@ -292,19 +292,22 @@ impl Executor {
         }
     }
 
-    pub async fn force_eval(&mut self, value: Value) -> Result<Value, Error> {
-        let mut current = value;
+    pub async fn eval_until(&mut self, expr: Value) -> Result<Value, Error> {
+        let mut current = expr;
 
         loop {
             match current {
-                Value::Atom(str) => {
-                    current = self.env.get(&str).ok_or(Error::UnknownSymbol(str))?.clone();
+                Value::Decimal(_) | Value::Function(_) => return Ok(current),
+                Value::Atom(name) => {
+                    if let Some(val) = self.env.get(&name) {
+                        current = val.clone()
+                    } else {
+                        return Err(Error::UnknownSymbol(name));
+                    }
                 }
                 Value::List(_) => {
-                    let future = self.eval(current);
-                    current = future.await?;
+                    current = self.eval(current).await?;
                 }
-                Value::Decimal(_) | Value::Function(_) => return Ok(current),
             }
         }
     }

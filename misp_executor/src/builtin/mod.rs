@@ -39,7 +39,7 @@ macro_rules! quick_eval {
         let val = $e.stack.pop().ok_or(Error::EmptyStack)?;
         match val {
             Value::$pat(inner_val) => inner_val,
-            _ => match $e.eval(val).await? {
+            _ => match $e.eval_until(val).await? {
                 Value::$pat(inner_val) => inner_val,
                 _ => return Err(Error::InvalidType),
             },

@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, vec, vec::Vec};
+use alloc::{boxed::Box, vec::Vec};
 use misp_num::{Sign, decimal::Decimal};
 
 use crate::{Error, Executor, NativeMispFuture, Value, arity_check, quick_eval};
@@ -28,7 +28,7 @@ macro_rules! binary_op {
                     *value = match thunk {
                         Value::Decimal(val) => val,
                         other => {
-                            let evaluated = executor.force_eval(other).await?;
+                            let evaluated = executor.eval_until(other).await?;
                             let Value::Decimal(val) = evaluated else {
                                 return Err(Error::InvalidType);
                             };
