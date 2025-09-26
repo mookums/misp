@@ -60,9 +60,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| misp.eval("(square 15)").unwrap());
     });
 
-    c.bench_function("interp small summate", |b| {
-        b.iter(|| misp.eval("(summate 0 10 sqrt)").unwrap());
-    });
+    // c.bench_function("interp small summate", |b| {
+    //     b.iter(|| misp.eval("(summate 0 10 sqrt)").unwrap());
+    // });
 
     c.bench_function("interp pi constant", |b| {
         b.iter(|| misp.eval("math::pi").unwrap());
@@ -72,21 +72,21 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| misp.eval("(> 10 5)").unwrap());
     });
 
-    c.bench_function("interp runtime fibonacci", |b| {
-        misp.eval("(func fib (n) (if (<= n 1) n (+ (fib (- n 2)) (fib (- n 1)))))")
-            .unwrap();
-        b.iter(|| misp.eval("(fib 1000)").unwrap());
-    });
+    // c.bench_function("interp runtime fibonacci", |b| {
+    //     misp.eval("(func fib (n) (if (<= n 1) n (+ (fib (- n 2)) (fib (- n 1)))))")
+    //         .unwrap();
+    //     b.iter(|| misp.eval("(fib 1000)").unwrap());
+    // });
 
-    c.bench_function("interp runtime factorial", |b| {
-        misp.eval("(func factorialRuntime (n) (if (<= n 1) 1 (* n (factorialRuntime (- n 1)))))")
-            .unwrap();
-        b.iter(|| misp.eval("(factorialRuntime 1000)").unwrap());
-    });
+    // c.bench_function("interp runtime factorial", |b| {
+    //     misp.eval("(func factorialRuntime (n) (if (<= n 1) 1 (* n (factorialRuntime (- n 1)))))")
+    //         .unwrap();
+    //     b.iter(|| misp.eval("(factorialRuntime 1000)").unwrap());
+    // });
 
-    c.bench_function("interp builtin factorial", |b| {
-        b.iter(|| misp.eval("(factorial 1000)").unwrap());
-    });
+    // c.bench_function("interp builtin factorial", |b| {
+    //     b.iter(|| misp.eval("(factorial 1000)").unwrap());
+    // });
 }
 
 criterion_group!(benches, criterion_benchmark);

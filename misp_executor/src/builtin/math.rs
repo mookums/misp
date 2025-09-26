@@ -39,56 +39,47 @@ macro_rules! binary_op {
     };
 }
 
-// macro_rules! binary_comparison_op {
-//     ($name:ident, $op:tt) => {
-//         pub fn $name(executor_ptr: *mut Executor) -> NativeMispFuture {
-//             Box::pin(async move {
-//                 let executor = unsafe { &mut *executor_ptr };
+macro_rules! binary_comparison_op {
+    ($name:ident, $op:tt) => {
+        pub fn $name(executor: &mut Executor) -> Result<Value, Error> {
+            let Value::Decimal(arg_count) = executor.stack.pop().ok_or(Error::EmptyStack)?
+            else {
+                return Err(Error::InvalidType);
+            };
 
-//                 let Value::Decimal(arg_count) = executor.stack.pop().ok_or(Error::EmptyStack)?
-//                 else {
-//                     return Err(Error::InvalidType);
-//                 };
+            let count = arg_count.to_u128() as usize;
 
-//                 let count = arg_count.to_u128() as usize;
+            let mut prev = None;
 
-//                 let mut prev = None;
+            for _ in 0..count {
+                let thunk = executor.stack.pop().ok_or(Error::EmptyStack)?;
 
-//                 for _ in 0..count {
-//                     let thunk = executor.stack.pop().ok_or(Error::EmptyStack)?;
+                let Value::Decimal(value) = thunk else {
+                        return Err(Error::InvalidType);
+                };
 
-//                     let value = if let Value::Decimal(val) = thunk {
-//                         val
-//                     } else {
-//                         let Value::Decimal(val) = executor.eval(thunk).await? else {
-//                             return Err(Error::InvalidType);
-//                         };
-//                         val
-//                     };
+                if let Some(prev_value) = prev && Decimal::from(value $op prev_value) != Decimal::ONE {
+                        return Ok(Value::Decimal(Decimal::ZERO))
+                }
 
-//                     if let Some(prev_value) = prev && Decimal::from(value $op prev_value) != Decimal::ONE {
-//                             return Ok(Value::Decimal(Decimal::ZERO))
-//                     }
+                prev = Some(value)
+            }
 
-//                     prev = Some(value)
-//                 }
-
-//                 Ok(Value::Decimal(Decimal::ONE))
-//             })
-//         }
-//     };
-// }
+            Ok(Value::Decimal(Decimal::ONE))
+        }
+    };
+}
 
 binary_op!(builtin_add, +);
 binary_op!(builtin_minus,-);
 binary_op!(builtin_multiply, *);
 binary_op!(builtin_divide, /);
-// binary_comparison_op!(builtin_equal, ==);
-// binary_comparison_op!(builtin_not_equal, !=);
-// binary_comparison_op!(builtin_lt, <);
-// binary_comparison_op!(builtin_lte, <=);
-// binary_comparison_op!(builtin_gt, >);
-// binary_comparison_op!(builtin_gte, >=);
+binary_comparison_op!(builtin_equal, ==);
+binary_comparison_op!(builtin_not_equal, !=);
+binary_comparison_op!(builtin_lt, <);
+binary_comparison_op!(builtin_lte, <=);
+binary_comparison_op!(builtin_gt, >);
+binary_comparison_op!(builtin_gte, >=);
 
 // pub fn builtin_mod(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
 //     if args.len() != 2 {
@@ -219,17 +210,14 @@ pub fn builtin_sqrt(executor: &mut Executor) -> Result<Value, Error> {
     Ok(Value::Decimal(evaluated.sqrt()))
 }
 
-// pub fn builtin_pow(executor: *mut Executor) -> NativeMispFuture {
-//     Box::pin(async move {
-//         let executor = unsafe { &mut *executor };
-//         arity_check!(executor, "pow", 2);
+pub fn builtin_pow(executor: &mut Executor) -> Result<Value, Error> {
+    arity_check!(executor, "pow", 2);
 
-//         let pow = quick_eval!(executor, Decimal);
-//         let base = quick_eval!(executor, Decimal);
+    let pow = quick_eval!(executor, Decimal);
+    let base = quick_eval!(executor, Decimal);
 
-//         Ok(Value::Decimal(base.pow(pow)))
-//     })
-// }
+    Ok(Value::Decimal(base.pow(pow)))
+}
 
 // pub fn builtin_summate(executor: *mut Executor) -> NativeMispFuture {
 //     Box::pin(async move {

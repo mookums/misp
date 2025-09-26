@@ -27,7 +27,9 @@ use crate::{
     //     },
     // },
     builtin::math::{
-        builtin_abs, builtin_add, builtin_divide, builtin_minus, builtin_multiply, builtin_sqrt,
+        builtin_abs, builtin_add, builtin_divide, builtin_equal, builtin_gt, builtin_gte,
+        builtin_lt, builtin_lte, builtin_minus, builtin_multiply, builtin_not_equal, builtin_pow,
+        builtin_sqrt,
     },
     config::Config,
     environment::Environment,
@@ -139,16 +141,16 @@ impl Default for Executor {
         env.define_native_function("*", builtin_multiply);
         env.define_native_function("/", builtin_divide);
         // env.define_native_function("%", builtin_mod);
-        // env.define_native_function("==", builtin_equal);
-        // env.define_native_function("!=", builtin_not_equal);
-        // env.define_native_function("<", builtin_lt);
-        // env.define_native_function("<=", builtin_lte);
-        // env.define_native_function(">", builtin_gt);
-        // env.define_native_function(">=", builtin_gte);
+        env.define_native_function("==", builtin_equal);
+        env.define_native_function("!=", builtin_not_equal);
+        env.define_native_function("<", builtin_lt);
+        env.define_native_function("<=", builtin_lte);
+        env.define_native_function(">", builtin_gt);
+        env.define_native_function(">=", builtin_gte);
         env.define_native_function("abs", builtin_abs);
         // env.define_native_function("min", builtin_min);
         // env.define_native_function("max", builtin_max);
-        // env.define_native_function("pow", builtin_pow);
+        env.define_native_function("pow", builtin_pow);
         env.define_native_function("sqrt", builtin_sqrt);
         // env.define_native_function("summate", builtin_summate);
 
