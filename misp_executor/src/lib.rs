@@ -1,9 +1,6 @@
 #![no_std]
 extern crate alloc;
 
-extern crate std;
-use std::eprintln;
-
 mod builtin;
 pub mod config;
 pub mod environment;
@@ -24,7 +21,11 @@ use misp_num::decimal::Decimal;
 use misp_parser::SExpr;
 
 use crate::{
-    builtin::math::{builtin_abs, builtin_pow, builtin_sqrt},
+    builtin::math::{
+        builtin_abs, builtin_add, builtin_divide, builtin_equal, builtin_gt, builtin_gte,
+        builtin_lt, builtin_lte, builtin_minus, builtin_multiply, builtin_not_equal, builtin_pow,
+        builtin_sqrt,
+    },
     config::Config,
     environment::Environment,
     future::{EvalFuture, EvalFutureContext, create_eval_waker},
@@ -37,7 +38,7 @@ pub struct Lambda {
 }
 
 type NativeMispFuture = Pin<Box<dyn Future<Output = Result<Value, Error>> + 'static>>;
-type NativeMispFunction = fn(*mut Executor, Vec<Value>) -> NativeMispFuture;
+type NativeMispFunction = fn(*mut Executor) -> NativeMispFuture;
 
 #[derive(Debug, Clone, Hash)]
 pub struct RuntimeMispFunction {
@@ -130,17 +131,17 @@ impl Default for Executor {
         // env.define_native_function("if", builtin_if);
 
         // Math Functions
-        // env.define_native_function("+", builtin_add);
-        // env.define_native_function("-", builtin_minus);
-        // env.define_native_function("*", builtin_multiply);
-        // env.define_native_function("/", builtin_divide);
+        env.define_native_function("+", builtin_add);
+        env.define_native_function("-", builtin_minus);
+        env.define_native_function("*", builtin_multiply);
+        env.define_native_function("/", builtin_divide);
         // env.define_native_function("%", builtin_mod);
-        // env.define_native_function("==", builtin_equal);
-        // env.define_native_function("!=", builtin_not_equal);
-        // env.define_native_function("<", builtin_lt);
-        // env.define_native_function("<=", builtin_lte);
-        // env.define_native_function(">", builtin_gt);
-        // env.define_native_function(">=", builtin_gte);
+        env.define_native_function("==", builtin_equal);
+        env.define_native_function("!=", builtin_not_equal);
+        env.define_native_function("<", builtin_lt);
+        env.define_native_function("<=", builtin_lte);
+        env.define_native_function(">", builtin_gt);
+        env.define_native_function(">=", builtin_gte);
         env.define_native_function("abs", builtin_abs);
         // env.define_native_function("min", builtin_min);
         // env.define_native_function("max", builtin_max);
@@ -219,7 +220,7 @@ impl Executor {
                 result: Some(Ok(expr)),
                 waker: parent_waker,
             },
-            Value::List(ref values) => {
+            Value::List(values) => {
                 let Value::Atom(ref name) = values[0] else {
                     panic!()
                 };
@@ -230,7 +231,11 @@ impl Executor {
 
                 match func {
                     Function::Native(f) => {
-                        let native_future = f(self, values[1..].to_vec());
+                        let arity: u64 = (values.len() - 1) as u64;
+                        self.stack.extend(values.into_iter().skip(1));
+                        self.stack.push(Value::Decimal(arity.into()));
+
+                        let native_future = f(self);
 
                         self.native_futures.insert(future_id, native_future);
                         self.ready_future = Some(future_id);
@@ -240,29 +245,6 @@ impl Executor {
                             waker: parent_waker,
                         }
                     }
-                    // Function::Native(f) => {
-                    //     let native_future = f(self, values[1..].to_vec());
-
-                    //     let child_future_id = self.next_future_id;
-                    //     self.next_future_id += 1;
-
-                    //     let current_waker = create_eval_waker(self, future_id);
-                    //     let child_waker = create_eval_waker(self, child_future_id);
-
-                    //     let child_context = EvalFutureContext {
-                    //         result: None,
-                    //         waker: Some(child_waker),
-                    //     };
-
-                    //     self.futures.insert(child_future_id, child_context);
-                    //     self.native_futures.insert(child_future_id, native_future);
-                    //     self.ready_future = Some(child_future_id);
-
-                    //     EvalFutureContext {
-                    //         result: None,
-                    //         waker: Some(current_waker),
-                    //     }
-                    // }
                     Function::Runtime(rt) => todo!(),
                     Function::Lambda(l) => todo!(),
                 }
@@ -315,16 +297,19 @@ impl Executor {
                 let mut context = Context::from_waker(waker);
 
                 loop {
-                    {
-                        eprintln!("Memos: {:?}", self.memos.keys());
-                        eprintln!("Stack: {:?}", self.stack);
-                        eprintln!("Futures: {:?}", self.futures.keys());
-                        eprintln!("Native Futures: {:?}", self.native_futures.keys());
-                        eprintln!("Current Future: {:?}", self.current_future);
-                        eprintln!("Ready Future: {:?}", self.ready_future);
-                        eprintln!();
-                        std::thread::sleep(std::time::Duration::from_secs(1));
-                    }
+                    // {
+                    //     extern crate std;
+                    //     use std::eprintln;
+
+                    //     eprintln!("Memos: {:?}", self.memos.keys());
+                    //     eprintln!("Stack: {:?}", self.stack);
+                    //     eprintln!("Futures: {:?}", self.futures.keys());
+                    //     eprintln!("Native Futures: {:?}", self.native_futures.keys());
+                    //     eprintln!("Current Future: {:?}", self.current_future);
+                    //     eprintln!("Ready Future: {:?}", self.ready_future);
+                    //     eprintln!();
+                    //     std::thread::sleep(std::time::Duration::from_secs(1));
+                    // }
 
                     if let Some(ready) = self.ready_future {
                         self.current_future = Some(ready);

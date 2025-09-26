@@ -3,7 +3,7 @@ use core::{
     task::{Poll, RawWaker, RawWakerVTable, Waker},
 };
 
-use alloc::{rc::Rc, task::Wake};
+use alloc::rc::Rc;
 
 use crate::{Error, Executor, Value};
 
@@ -68,11 +68,6 @@ unsafe fn wake_eval(data: *const ()) {
 unsafe fn wake_eval_by_ref(data: *const ()) {
     let waker_data = unsafe { &*(data as *const EvalWakerData) };
     let executor = unsafe { &mut *waker_data.executor };
-    {
-        extern crate std;
-        use std::eprintln;
-        eprintln!("Resuming Future with Id: {}", waker_data.future_id);
-    }
     executor.ready_future = Some(waker_data.future_id);
 }
 

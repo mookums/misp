@@ -148,11 +148,13 @@ binary_comparison_op!(builtin_gte, >=);
 //     Ok(Value::Integer(left % right))
 // }
 
-pub fn builtin_abs(executor: *mut Executor, values: Vec<Value>) -> NativeMispFuture {
+pub fn builtin_abs(executor: *mut Executor) -> NativeMispFuture {
     Box::pin(async move {
         let executor = unsafe { &mut *executor };
 
-        let Value::Decimal(mut evaluated) = executor.eval(values[0].clone()).await? else {
+        let value = executor.stack.pop().ok_or(Error::EmptyStack)?;
+
+        let Value::Decimal(mut evaluated) = executor.eval(value).await? else {
             panic!()
         };
 
@@ -227,36 +229,23 @@ pub fn builtin_max(executor: *mut Executor) -> NativeMispFuture {
     })
 }
 
-pub fn builtin_sqrt(executor: *mut Executor, values: Vec<Value>) -> NativeMispFuture {
+pub fn builtin_sqrt(executor: *mut Executor) -> NativeMispFuture {
     Box::pin(async move {
         let executor = unsafe { &mut *executor };
-        // arity_check!(executor, "sqrt", 1);
-
-        let Value::Decimal(evaluated) = executor.eval(values[0].clone()).await? else {
-            panic!()
-        };
-
-        // let evaluated = quick_eval!(executor, Decimal);
+        arity_check!(executor, "sqrt", 1);
+        let evaluated = quick_eval!(executor, Decimal);
 
         Ok(Value::Decimal(evaluated.sqrt()))
     })
 }
 
-pub fn builtin_pow(executor: *mut Executor, values: Vec<Value>) -> NativeMispFuture {
+pub fn builtin_pow(executor: *mut Executor) -> NativeMispFuture {
     Box::pin(async move {
         let executor = unsafe { &mut *executor };
-        // arity_check!(executor, "pow", 2);
+        arity_check!(executor, "pow", 2);
 
-        let Value::Decimal(pow) = executor.eval(values[0].clone()).await? else {
-            panic!()
-        };
-
-        let Value::Decimal(base) = executor.eval(values[1].clone()).await? else {
-            panic!()
-        };
-
-        // let pow = quick_eval!(executor, Decimal);
-        // let base = quick_eval!(executor, Decimal);
+        let pow = quick_eval!(executor, Decimal);
+        let base = quick_eval!(executor, Decimal);
 
         Ok(Value::Decimal(base.pow(pow)))
     })
