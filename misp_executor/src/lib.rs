@@ -235,14 +235,25 @@ impl Executor {
                         self.stack.extend(values.into_iter().skip(1));
                         self.stack.push(Value::Decimal(arity.into()));
 
-                        let native_future = f(self);
+                        let mut native_future = f(self);
 
-                        self.native_futures.insert(future_id, native_future);
-                        self.ready_future = Some(future_id);
+                        let waker = Waker::noop();
+                        let mut context = Context::from_waker(waker);
 
-                        EvalFutureContext {
-                            result: None,
-                            waker: parent_waker,
+                        match native_future.poll_unpin(&mut context) {
+                            Poll::Ready(value) => EvalFutureContext {
+                                result: Some(value),
+                                waker: parent_waker,
+                            },
+                            Poll::Pending => {
+                                self.native_futures.insert(future_id, native_future);
+                                self.ready_future = Some(future_id);
+
+                                EvalFutureContext {
+                                    result: None,
+                                    waker: parent_waker,
+                                }
+                            }
                         }
                     }
                     Function::Runtime(rt) => todo!(),
