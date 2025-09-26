@@ -109,7 +109,7 @@ pub struct Executor {
     pub futures: HashMap<usize, EvalFutureContext>,
     pub native_futures: HashMap<usize, NativeMispFuture>,
     pub current_future: Option<usize>,
-    pub ready_future: Option<usize>,
+    pub ready_future: usize,
     pub next_future_id: usize,
 }
 
@@ -171,7 +171,7 @@ impl Default for Executor {
             futures: HashMap::default(),
             native_futures: HashMap::default(),
             current_future: None,
-            ready_future: None,
+            ready_future: 0,
             next_future_id: 0,
         }
     }
@@ -247,7 +247,7 @@ impl Executor {
                             },
                             Poll::Pending => {
                                 self.native_futures.insert(future_id, native_future);
-                                self.ready_future = Some(future_id);
+                                self.ready_future = future_id;
 
                                 EvalFutureContext {
                                     result: None,
@@ -298,7 +298,7 @@ impl Executor {
                     },
                 );
                 self.next_function_id += 1;
-                self.ready_future = Some(func_id);
+                self.ready_future = func_id;
                 self.current_future = Some(func_id);
 
                 // we actually need to do computation.
@@ -322,39 +322,43 @@ impl Executor {
                     //     std::thread::sleep(std::time::Duration::from_secs(1));
                     // }
 
-                    if let Some(ready) = self.ready_future {
-                        self.current_future = Some(ready);
-                        self.ready_future = None;
-
-                        let eval_future_waker = create_eval_waker(self, ready);
-                        if let Some(native) = self.native_futures.get_mut(&ready) {
-                            let mut ctx = Context::from_waker(&eval_future_waker);
-
-                            match native.poll_unpin(&mut ctx) {
-                                Poll::Ready(value) => {
-                                    let future_context =
-                                        self.futures.get_mut(&ready).expect("Future must exist");
-
-                                    future_context.result = Some(value);
-
-                                    self.native_futures.remove(&ready);
-
-                                    if let Some(parent_waker) = &future_context.waker {
-                                        parent_waker.wake_by_ref();
-                                    }
+                    match self.ready_future {
+                        ready if ready == func_id => {
+                            match main_future.as_mut().poll(&mut context) {
+                                Poll::Ready(result) => {
+                                    let result = result?;
+                                    self.env.set_prev(result.clone());
+                                    return Ok(result);
                                 }
-                                Poll::Pending => {}
+                                Poll::Pending => continue,
                             }
                         }
-                    }
+                        ready => {
+                            self.current_future = Some(ready);
 
-                    match main_future.as_mut().poll(&mut context) {
-                        Poll::Ready(result) => {
-                            let result = result?;
-                            self.env.set_prev(result.clone());
-                            return Ok(result);
+                            let eval_future_waker = create_eval_waker(self, ready);
+                            if let Some(native) = self.native_futures.get_mut(&ready) {
+                                let mut ctx = Context::from_waker(&eval_future_waker);
+
+                                match native.poll_unpin(&mut ctx) {
+                                    Poll::Ready(value) => {
+                                        let future_context = self
+                                            .futures
+                                            .get_mut(&ready)
+                                            .expect("Future must exist");
+
+                                        future_context.result = Some(value);
+
+                                        self.native_futures.remove(&ready);
+
+                                        if let Some(parent_waker) = &future_context.waker {
+                                            parent_waker.wake_by_ref();
+                                        }
+                                    }
+                                    Poll::Pending => {}
+                                }
+                            }
                         }
-                        Poll::Pending => continue,
                     }
                 }
             }

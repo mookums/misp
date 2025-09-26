@@ -61,14 +61,14 @@ pub struct EvalWakerData {
 unsafe fn wake_eval(data: *const ()) {
     let waker_data = unsafe { Rc::from_raw(data as *const EvalWakerData) };
     let executor = unsafe { &mut *waker_data.executor };
-    executor.ready_future = Some(waker_data.future_id);
+    executor.ready_future = waker_data.future_id;
     core::mem::drop(waker_data);
 }
 
 unsafe fn wake_eval_by_ref(data: *const ()) {
     let waker_data = unsafe { &*(data as *const EvalWakerData) };
     let executor = unsafe { &mut *waker_data.executor };
-    executor.ready_future = Some(waker_data.future_id);
+    executor.ready_future = waker_data.future_id;
 }
 
 unsafe fn clone_eval_waker(data: *const ()) -> RawWaker {
