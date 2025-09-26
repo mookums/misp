@@ -148,12 +148,17 @@ binary_comparison_op!(builtin_gte, >=);
 //     Ok(Value::Integer(left % right))
 // }
 
-pub fn builtin_abs(executor: *mut Executor) -> NativeMispFuture {
+pub fn builtin_abs(executor: *mut Executor, values: Vec<Value>) -> NativeMispFuture {
     Box::pin(async move {
         let executor = unsafe { &mut *executor };
-        arity_check!(executor, "abs", 1);
 
-        let mut evaluated = quick_eval!(executor, Decimal);
+        let Value::Decimal(mut evaluated) = executor.eval(values[0].clone()).await? else {
+            panic!()
+        };
+
+        // arity_check!(executor, "abs", 1);
+
+        // let mut evaluated = quick_eval!(executor, Decimal);
 
         evaluated.sign = Sign::Positive;
         Ok(Value::Decimal(evaluated))
@@ -222,55 +227,67 @@ pub fn builtin_max(executor: *mut Executor) -> NativeMispFuture {
     })
 }
 
-pub fn builtin_sqrt(executor: *mut Executor) -> NativeMispFuture {
+pub fn builtin_sqrt(executor: *mut Executor, values: Vec<Value>) -> NativeMispFuture {
     Box::pin(async move {
         let executor = unsafe { &mut *executor };
-        arity_check!(executor, "sqrt", 1);
+        // arity_check!(executor, "sqrt", 1);
 
-        let evaluated = quick_eval!(executor, Decimal);
+        let Value::Decimal(evaluated) = executor.eval(values[0].clone()).await? else {
+            panic!()
+        };
+
+        // let evaluated = quick_eval!(executor, Decimal);
 
         Ok(Value::Decimal(evaluated.sqrt()))
     })
 }
 
-pub fn builtin_pow(executor: *mut Executor) -> NativeMispFuture {
+pub fn builtin_pow(executor: *mut Executor, values: Vec<Value>) -> NativeMispFuture {
     Box::pin(async move {
         let executor = unsafe { &mut *executor };
-        arity_check!(executor, "pow", 2);
+        // arity_check!(executor, "pow", 2);
 
-        let pow = quick_eval!(executor, Decimal);
-        let base = quick_eval!(executor, Decimal);
+        let Value::Decimal(pow) = executor.eval(values[0].clone()).await? else {
+            panic!()
+        };
+
+        let Value::Decimal(base) = executor.eval(values[1].clone()).await? else {
+            panic!()
+        };
+
+        // let pow = quick_eval!(executor, Decimal);
+        // let base = quick_eval!(executor, Decimal);
 
         Ok(Value::Decimal(base.pow(pow)))
     })
 }
 
-pub fn builtin_summate(executor: *mut Executor) -> NativeMispFuture {
-    Box::pin(async move {
-        let executor = unsafe { &mut *executor };
-        arity_check!(executor, "summate", 3);
+// pub fn builtin_summate(executor: *mut Executor) -> NativeMispFuture {
+//     Box::pin(async move {
+//         let executor = unsafe { &mut *executor };
+//         arity_check!(executor, "summate", 3);
 
-        let func = quick_eval!(executor, Function);
-        let end = quick_eval!(executor, Decimal);
-        let start = quick_eval!(executor, Decimal);
+//         let func = quick_eval!(executor, Function);
+//         let end = quick_eval!(executor, Decimal);
+//         let start = quick_eval!(executor, Decimal);
 
-        let mut start = start.to_u128() as u64;
-        let end = end.to_u128() as u64;
-        let mut sum = Decimal::ZERO;
+//         let mut start = start.to_u128() as u64;
+//         let end = end.to_u128() as u64;
+//         let mut sum = Decimal::ZERO;
 
-        while start <= end {
-            let current_decimal = Value::Decimal(Decimal::from(start));
-            let result = executor
-                .run_function(func.clone(), vec![current_decimal])
-                .await?;
-            let Value::Decimal(result_decimal) = result else {
-                return Err(Error::InvalidType);
-            };
+//         while start <= end {
+//             let current_decimal = Value::Decimal(Decimal::from(start));
+//             let result = executor
+//                 .run_function(func.clone(), vec![current_decimal])
+//                 .await?;
+//             let Value::Decimal(result_decimal) = result else {
+//                 return Err(Error::InvalidType);
+//             };
 
-            sum += result_decimal;
-            start += 1;
-        }
+//             sum += result_decimal;
+//             start += 1;
+//         }
 
-        Ok(Value::Decimal(sum))
-    })
-}
+//         Ok(Value::Decimal(sum))
+//     })
+// }

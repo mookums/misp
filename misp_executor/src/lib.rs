@@ -1,19 +1,21 @@
 #![no_std]
 extern crate alloc;
 
+extern crate std;
+use std::eprintln;
+
 mod builtin;
 pub mod config;
 pub mod environment;
 pub mod future;
 
-use alloc::{boxed::Box, collections::VecDeque, rc::Rc, string::String, vec::Vec};
+use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 use compact_str::CompactString;
-use fnv::FnvHasher;
 use futures::FutureExt;
 use hashbrown::HashMap;
 
 use core::{
-    hash::{Hash, Hasher},
+    hash::Hash,
     pin::{Pin, pin},
     task::{Context, Poll, Waker},
 };
@@ -22,19 +24,10 @@ use misp_num::decimal::Decimal;
 use misp_parser::SExpr;
 
 use crate::{
-    builtin::{
-        combinatorics::{builtin_combinations, builtin_factorial, builtin_permutations},
-        control::builtin_if,
-        func::{builtin_func, builtin_lambda},
-        math::{
-            builtin_abs, builtin_add, builtin_divide, builtin_equal, builtin_gt, builtin_gte,
-            builtin_lt, builtin_lte, builtin_max, builtin_min, builtin_minus, builtin_multiply,
-            builtin_not_equal, builtin_pow, builtin_sqrt, builtin_summate,
-        },
-    },
+    builtin::math::{builtin_abs, builtin_pow, builtin_sqrt},
     config::Config,
-    environment::{Environment, Scope},
-    future::{EvalFuture, EvalFutureContext},
+    environment::Environment,
+    future::{EvalFuture, EvalFutureContext, create_eval_waker},
 };
 
 #[derive(Debug, Clone, Hash)]
@@ -44,7 +37,7 @@ pub struct Lambda {
 }
 
 type NativeMispFuture = Pin<Box<dyn Future<Output = Result<Value, Error>> + 'static>>;
-type NativeMispFunction = fn(*mut Executor) -> NativeMispFuture;
+type NativeMispFunction = fn(*mut Executor, Vec<Value>) -> NativeMispFuture;
 
 #[derive(Debug, Clone, Hash)]
 pub struct RuntimeMispFunction {
@@ -84,28 +77,6 @@ pub struct MemoKey {
     pub args_hash: u64,
 }
 
-#[derive(Debug, Clone)]
-pub enum Instruction {
-    Push(Value),
-    Store(CompactString),
-    Load(CompactString),
-    Call(usize),
-    PushScope,
-    PushDefinedScope(Scope),
-    PopScope,
-    Resume(usize),
-    Await(usize),
-    Marker(usize),
-    MemoCheck {
-        id: usize,
-        params: Rc<Vec<CompactString>>,
-    },
-    MemoStore {
-        id: usize,
-        params: Rc<Vec<CompactString>>,
-    },
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Unknown Symbol: {0}")]
@@ -126,38 +97,18 @@ pub enum Error {
     EmptyStack,
 }
 
-pub struct Injector<'a> {
-    instructions: &'a mut VecDeque<Instruction>,
-    index: usize,
-}
-
-impl<'a> Injector<'a> {
-    pub fn new(instructions: &'a mut VecDeque<Instruction>) -> Self {
-        Self {
-            instructions,
-            index: 0,
-        }
-    }
-
-    #[inline(always)]
-    pub fn inject(&mut self, instruction: Instruction) {
-        self.instructions.insert(self.index, instruction);
-        self.index += 1;
-    }
-}
-
 pub struct Executor {
     pub config: Config,
     pub env: Environment,
-    pub instructions: VecDeque<Instruction>,
     pub stack: Vec<Value>,
 
     pub memos: HashMap<MemoKey, Value>,
     pub next_function_id: usize,
 
-    pub waker: &'static Waker,
     pub futures: HashMap<usize, EvalFutureContext>,
     pub native_futures: HashMap<usize, NativeMispFuture>,
+    pub current_future: Option<usize>,
+    pub ready_future: Option<usize>,
     pub next_future_id: usize,
 }
 
@@ -172,35 +123,35 @@ impl Default for Executor {
         env.load_constants();
 
         // Functions
-        env.define_native_function("func", builtin_func);
-        env.define_native_function("lambda", builtin_lambda);
+        // env.define_native_function("func", builtin_func);
+        // env.define_native_function("lambda", builtin_lambda);
 
         // Control Functions
-        env.define_native_function("if", builtin_if);
+        // env.define_native_function("if", builtin_if);
 
         // Math Functions
-        env.define_native_function("+", builtin_add);
-        env.define_native_function("-", builtin_minus);
-        env.define_native_function("*", builtin_multiply);
-        env.define_native_function("/", builtin_divide);
+        // env.define_native_function("+", builtin_add);
+        // env.define_native_function("-", builtin_minus);
+        // env.define_native_function("*", builtin_multiply);
+        // env.define_native_function("/", builtin_divide);
         // env.define_native_function("%", builtin_mod);
-        env.define_native_function("==", builtin_equal);
-        env.define_native_function("!=", builtin_not_equal);
-        env.define_native_function("<", builtin_lt);
-        env.define_native_function("<=", builtin_lte);
-        env.define_native_function(">", builtin_gt);
-        env.define_native_function(">=", builtin_gte);
+        // env.define_native_function("==", builtin_equal);
+        // env.define_native_function("!=", builtin_not_equal);
+        // env.define_native_function("<", builtin_lt);
+        // env.define_native_function("<=", builtin_lte);
+        // env.define_native_function(">", builtin_gt);
+        // env.define_native_function(">=", builtin_gte);
         env.define_native_function("abs", builtin_abs);
-        env.define_native_function("min", builtin_min);
-        env.define_native_function("max", builtin_max);
+        // env.define_native_function("min", builtin_min);
+        // env.define_native_function("max", builtin_max);
         env.define_native_function("pow", builtin_pow);
         env.define_native_function("sqrt", builtin_sqrt);
-        env.define_native_function("summate", builtin_summate);
+        // env.define_native_function("summate", builtin_summate);
 
         // Combinatorics
-        env.define_native_function("factorial", builtin_factorial);
-        env.define_native_function("combinations", builtin_combinations);
-        env.define_native_function("permutations", builtin_permutations);
+        // env.define_native_function("factorial", builtin_factorial);
+        // env.define_native_function("combinations", builtin_combinations);
+        // env.define_native_function("permutations", builtin_permutations);
 
         // Trig Functions
         // env.define_native_function("sin", builtin_sin);
@@ -213,278 +164,116 @@ impl Default for Executor {
         Self {
             config,
             env,
-            instructions: VecDeque::default(),
             stack: Vec::default(),
             next_function_id: 0,
             memos: HashMap::default(),
-            waker: Waker::noop(),
             futures: HashMap::default(),
             native_futures: HashMap::default(),
+            current_future: None,
+            ready_future: None,
             next_future_id: 0,
         }
     }
 }
 
 impl Executor {
-    pub fn compile(value: Value, injector: &mut Injector) -> Result<(), Error> {
-        match value {
-            Value::Atom(atom) => injector.inject(Instruction::Load(atom)),
-            Value::Decimal(_) | Value::Function(_) => {
-                injector.inject(Instruction::Push(value));
-            }
-            Value::List(mut values) => {
-                let arity = values.len() - 1;
+    // async fn run_function(&mut self, func: Function, args: Vec<Value>) -> Result<Value, Error> {
+    //     let future_id = self.next_future_id;
+    //     self.next_future_id += 1;
 
-                let mut drain = values.drain(0..values.len());
-                let Value::Atom(name) = drain.next().unwrap() else {
-                    return Err(Error::InvalidType);
-                };
+    //     injector.inject(Instruction::Push(Value::Function(func)));
+    //     injector.inject(Instruction::Call(arity));
+    //     injector.inject(Instruction::Resume(future_id));
 
-                for param in drain {
-                    injector.inject(Instruction::Push(param));
-                }
+    //     self.futures.insert(future_id, EvalFutureContext::default());
 
-                injector.inject(Instruction::Load(name));
-                injector.inject(Instruction::Call(arity));
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn compile_function(&mut self, function: Function) -> Result<(), Error> {
-        match function {
-            Function::Native(f) => {
-                let mut native_future = f(self);
-
-                match native_future.poll_unpin(&mut Context::from_waker(self.waker)) {
-                    Poll::Ready(value) => {
-                        let value = value?;
-                        self.stack.push(value);
-                        return Ok(());
-                    }
-                    Poll::Pending => {
-                        let future_id = self.next_future_id;
-                        self.next_future_id += 1;
-
-                        self.native_futures.insert(future_id, native_future);
-
-                        let mut injector = Injector::new(&mut self.instructions);
-                        injector.inject(Instruction::Await(future_id));
-                    }
-                }
-            }
-            Function::Runtime(f) => {
-                arity_check!(self, "<func>", f.params.len());
-
-                let mut injector = Injector {
-                    instructions: &mut self.instructions,
-                    index: 0,
-                };
-
-                injector.inject(Instruction::PushScope);
-
-                // Reverse order ensures the correct value->name binding here.
-                for param in f.params.iter().rev() {
-                    Self::compile(self.stack.pop().unwrap(), &mut injector)?;
-                    injector.inject(Instruction::Store(param.clone()));
-                }
-
-                injector.inject(Instruction::MemoCheck {
-                    id: f.id,
-                    params: f.params.clone(),
-                });
-
-                let body = (*f.body).clone();
-                Self::compile(body, &mut injector)?;
-
-                injector.inject(Instruction::MemoStore {
-                    id: f.id,
-                    params: f.params,
-                });
-
-                injector.inject(Instruction::Marker(f.id));
-                injector.inject(Instruction::PopScope);
-            }
-            Function::Lambda(l) => {
-                arity_check!(self, "<lambda>", l.params.len());
-
-                let mut injector = Injector {
-                    instructions: &mut self.instructions,
-                    index: 0,
-                };
-
-                injector.inject(Instruction::PushScope);
-
-                // Reverse order ensures the correct value->name binding here.
-                for param in l.params.into_iter().rev() {
-                    Self::compile(self.stack.pop().unwrap(), &mut injector)?;
-                    injector.inject(Instruction::Store(param));
-                }
-
-                Self::compile(*l.body, &mut injector)?;
-                injector.inject(Instruction::PopScope);
-            }
-        }
-
-        Ok(())
-    }
-
-    fn execute_instruction(self: &mut Executor, instruction: Instruction) -> Result<(), Error> {
-        // {
-        //     extern crate std;
-        //     use std::eprintln;
-        //     eprintln!("Current Instruction: {instruction:?}");
-        //     eprintln!("Instructions: {:?}", self.instructions);
-        //     eprintln!("Memos: {:?}", self.memos.keys());
-        //     eprintln!("Stack: {:?}", self.stack);
-        //     eprintln!("Futures: {:?}", self.futures.keys());
-        //     eprintln!("Native Futures: {:?}", self.native_futures.keys());
-        //     eprintln!();
-        //     std::thread::sleep(std::time::Duration::from_secs(1));
-        // }
-
-        match instruction {
-            Instruction::Push(value) => {
-                self.stack.push(value);
-            }
-            Instruction::Store(name) => {
-                self.env.set(name, self.stack.pop().unwrap());
-            }
-            Instruction::Load(name) => {
-                let value = self.env.get(&name).ok_or(Error::UnknownSymbol(name))?;
-                self.stack.push(value.clone());
-            }
-            Instruction::Call(arity) => {
-                let func = self.stack.pop().unwrap();
-
-                match func {
-                    Value::Function(f) => {
-                        let arity_decimal = Decimal::from(arity as u64);
-                        self.stack.push(Value::Decimal(arity_decimal));
-                        self.compile_function(f)?;
-                    }
-                    _ => return Err(Error::FunctionNotFound),
-                }
-            }
-            Instruction::PushScope => {
-                self.env.push_scope();
-            }
-            Instruction::PushDefinedScope(scope) => {
-                self.env.push_given_scope(scope);
-            }
-            Instruction::PopScope => {
-                self.env.pop_scope();
-            }
-            Instruction::Marker(_) => {}
-            Instruction::MemoCheck { id, params } => {
-                let mut hasher = FnvHasher::default();
-                for param in params.iter() {
-                    let value = self.env.get(param).unwrap();
-                    value.hash(&mut hasher);
-                }
-
-                let key = MemoKey {
-                    id,
-                    args_hash: hasher.finish(),
-                };
-
-                if let Some(value) = self.memos.get(&key) {
-                    // eprintln!("Cache Hit! {key:?} -> {value:?}");
-                    self.stack.push(value.clone());
-
-                    while let Some(instruction) = self.instructions.pop_front() {
-                        if matches!(instruction, Instruction::Marker(tag) if tag == id) {
-                            break;
-                        }
-                    }
-                }
-            }
-            Instruction::MemoStore { id, params } => {
-                let mut hasher = FnvHasher::default();
-                for param in params.iter() {
-                    let value = self.env.get(param).unwrap();
-                    value.hash(&mut hasher);
-                }
-
-                let key = MemoKey {
-                    id,
-                    args_hash: hasher.finish(),
-                };
-
-                let value = self.stack.last().unwrap();
-                self.memos.insert(key, value.clone());
-            }
-            Instruction::Resume(id) => {
-                let value = self.stack.pop().ok_or(Error::EmptyStack)?;
-
-                if let Some(ctx) = self.futures.get_mut(&id) {
-                    ctx.result = Some(Ok(value));
-
-                    if let Some(waker) = ctx.waker.take() {
-                        waker.wake();
-                    }
-                }
-            }
-            Instruction::Await(id) => {
-                let mut context = Context::from_waker(self.waker);
-
-                let future = self
-                    .native_futures
-                    .get_mut(&id)
-                    .expect("Native function doesnt exist");
-
-                match future.as_mut().poll(&mut context) {
-                    Poll::Ready(result) => {
-                        self.stack.push(result?);
-                        self.native_futures.remove(&id);
-                    }
-                    Poll::Pending => {
-                        self.instructions.insert(1, Instruction::Await(id));
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn run_function(&mut self, func: Function, args: Vec<Value>) -> Result<Value, Error> {
-        let future_id = self.next_future_id;
-        self.next_future_id += 1;
-
-        let mut injector = Injector::new(&mut self.instructions);
-        let arity = args.len();
-        for arg in args {
-            injector.inject(Instruction::Push(arg));
-        }
-
-        injector.inject(Instruction::Push(Value::Function(func)));
-        injector.inject(Instruction::Call(arity));
-        injector.inject(Instruction::Resume(future_id));
-
-        self.futures.insert(future_id, EvalFutureContext::default());
-
-        EvalFuture {
-            id: future_id,
-            executor: self as *mut Executor,
-        }
-        .await
-    }
+    //     EvalFuture {
+    //         id: future_id,
+    //         executor: self as *mut Executor,
+    //     }
+    //     .await
+    // }
 
     pub fn eval(&mut self, expr: Value) -> EvalFuture {
         let future_id = self.next_future_id;
         self.next_future_id += 1;
 
-        let mut injector = Injector::new(&mut self.instructions);
-        Self::compile(expr, &mut injector).unwrap();
-        injector.inject(Instruction::Resume(future_id));
+        let parent_waker = self
+            .current_future
+            .and_then(|cf| self.futures.get(&cf).and_then(|f| f.waker.clone()));
 
-        self.futures.insert(future_id, EvalFutureContext::default());
+        let context = match expr {
+            Value::Atom(ref name) => {
+                let result = if let Some(val) = self.env.get(name) {
+                    Ok(val.clone())
+                } else {
+                    Err(Error::UnknownSymbol(name.clone()))
+                };
+
+                EvalFutureContext {
+                    result: Some(result),
+                    waker: parent_waker,
+                }
+            }
+            Value::Decimal(_) | Value::Function(_) => EvalFutureContext {
+                result: Some(Ok(expr)),
+                waker: parent_waker,
+            },
+            Value::List(ref values) => {
+                let Value::Atom(ref name) = values[0] else {
+                    panic!()
+                };
+
+                let Value::Function(func) = self.env.get(name).unwrap().clone() else {
+                    panic!()
+                };
+
+                match func {
+                    Function::Native(f) => {
+                        let native_future = f(self, values[1..].to_vec());
+
+                        self.native_futures.insert(future_id, native_future);
+                        self.ready_future = Some(future_id);
+
+                        EvalFutureContext {
+                            result: None,
+                            waker: parent_waker,
+                        }
+                    }
+                    // Function::Native(f) => {
+                    //     let native_future = f(self, values[1..].to_vec());
+
+                    //     let child_future_id = self.next_future_id;
+                    //     self.next_future_id += 1;
+
+                    //     let current_waker = create_eval_waker(self, future_id);
+                    //     let child_waker = create_eval_waker(self, child_future_id);
+
+                    //     let child_context = EvalFutureContext {
+                    //         result: None,
+                    //         waker: Some(child_waker),
+                    //     };
+
+                    //     self.futures.insert(child_future_id, child_context);
+                    //     self.native_futures.insert(child_future_id, native_future);
+                    //     self.ready_future = Some(child_future_id);
+
+                    //     EvalFutureContext {
+                    //         result: None,
+                    //         waker: Some(current_waker),
+                    //     }
+                    // }
+                    Function::Runtime(rt) => todo!(),
+                    Function::Lambda(l) => todo!(),
+                }
+            }
+        };
+
+        self.futures.insert(future_id, context);
 
         EvalFuture {
             id: future_id,
-            executor: self as *mut Executor,
+            executor: self,
         }
     }
 
@@ -506,13 +295,61 @@ impl Executor {
                 Ok(value)
             }
             _ => {
+                let waker = Waker::noop();
+                let func_id = self.next_function_id;
+                self.futures.insert(
+                    func_id,
+                    EvalFutureContext {
+                        result: None,
+                        waker: Some(waker.clone()),
+                    },
+                );
+                self.next_function_id += 1;
+                self.ready_future = Some(func_id);
+                self.current_future = Some(func_id);
+
+                // we actually need to do computation.
                 let future = self.eval(value);
                 let mut main_future = pin!(future);
-                let mut context = Context::from_waker(self.waker);
+
+                let mut context = Context::from_waker(waker);
 
                 loop {
-                    while let Some(instruction) = self.instructions.pop_front() {
-                        self.execute_instruction(instruction)?;
+                    {
+                        eprintln!("Memos: {:?}", self.memos.keys());
+                        eprintln!("Stack: {:?}", self.stack);
+                        eprintln!("Futures: {:?}", self.futures.keys());
+                        eprintln!("Native Futures: {:?}", self.native_futures.keys());
+                        eprintln!("Current Future: {:?}", self.current_future);
+                        eprintln!("Ready Future: {:?}", self.ready_future);
+                        eprintln!();
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                    }
+
+                    if let Some(ready) = self.ready_future {
+                        self.current_future = Some(ready);
+                        self.ready_future = None;
+
+                        let eval_future_waker = create_eval_waker(self, ready);
+                        if let Some(native) = self.native_futures.get_mut(&ready) {
+                            let mut ctx = Context::from_waker(&eval_future_waker);
+
+                            match native.poll_unpin(&mut ctx) {
+                                Poll::Ready(value) => {
+                                    let future_context =
+                                        self.futures.get_mut(&ready).expect("Future must exist");
+
+                                    future_context.result = Some(value);
+
+                                    self.native_futures.remove(&ready);
+
+                                    if let Some(parent_waker) = &future_context.waker {
+                                        parent_waker.wake_by_ref();
+                                    }
+                                }
+                                Poll::Pending => {}
+                            }
+                        }
                     }
 
                     match main_future.as_mut().poll(&mut context) {
