@@ -12,7 +12,7 @@ pub struct Scope {
 
 #[derive(Debug, Clone)]
 pub struct Environment {
-    scopes: Vec<Scope>,
+    pub scopes: Vec<Scope>,
 }
 
 impl Default for Environment {

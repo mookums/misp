@@ -27,6 +27,9 @@ enum Commands {
     Eval {
         expression: String,
     },
+    Compile {
+        expression: String,
+    },
     Bench {
         expression: String,
         #[arg(short, long, default_value_t = 100)]
@@ -197,6 +200,16 @@ fn main() {
                         .join(", ")
                 ),
                 Err(err) => eprintln!("Error: {}", err),
+            }
+        }
+        Commands::Compile { expression } => {
+            let mut misp = Misp::default();
+            let instrs = misp.compile_script(&expression).unwrap();
+
+            println!("pc: {}", instrs.0);
+
+            for (i, instr) in instrs.1.into_iter().enumerate() {
+                println!("{i}: {instr}");
             }
         }
         Commands::Bench { expression, repeat } => {

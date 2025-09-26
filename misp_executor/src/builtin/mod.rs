@@ -1,6 +1,6 @@
-pub mod combinatorics;
-pub mod control;
-pub mod func;
+// pub mod combinatorics;
+// pub mod control;
+// pub mod func;
 pub mod math;
 // pub mod trig;
 
@@ -39,10 +39,10 @@ macro_rules! quick_eval {
         let val = $e.stack.pop().ok_or(Error::EmptyStack)?;
         match val {
             Value::$pat(inner_val) => inner_val,
-            _ => match $e.eval(val).await? {
-                Value::$pat(inner_val) => inner_val,
-                _ => return Err(Error::InvalidType),
-            },
+            _ => return Err(Error::InvalidType),
+            // _ => match $e.eval(val).await? {
+            //     Value::$pat(inner_val) => inner_val,
+            // },
         }
     }};
 }

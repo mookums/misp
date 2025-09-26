@@ -1,9 +1,9 @@
-use misp_executor::{Executor, Function, Value};
+use misp_executor::{Executor, Function, Value, instruction::Instruction};
 use misp_parser::Parser;
 
 #[derive(Default)]
 pub struct Misp {
-    executor: Executor,
+    pub executor: Executor,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -28,6 +28,25 @@ impl Misp {
             .into_iter()
             .map(|s| self.executor.execute(s.into()))
             .collect::<Result<Vec<Value>, misp_executor::Error>>()?)
+    }
+
+    pub fn compile(&mut self, input: &str) -> Result<(usize, Vec<Instruction>), Error> {
+        let mut parser = Parser::new(input);
+        let sexpr = parser.parse()?;
+
+        Ok(self.executor.compile(sexpr.into())?)
+    }
+
+    pub fn compile_script(&mut self, input: &str) -> Result<(usize, Vec<Instruction>), Error> {
+        let mut parser = Parser::new(input);
+        let sexprs = parser.parse_multiple()?;
+
+        for sexpr in &sexprs[0..sexprs.len() - 1] {
+            self.executor.compile(sexpr.clone().into())?;
+        }
+
+        let last = sexprs.last().unwrap().clone();
+        Ok(self.executor.compile(last.into())?)
     }
 
     pub fn print(value: &Value) -> String {

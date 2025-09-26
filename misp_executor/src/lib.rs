@@ -4,37 +4,34 @@ extern crate alloc;
 mod builtin;
 pub mod config;
 pub mod environment;
-pub mod future;
+pub mod instruction;
 
-use alloc::{boxed::Box, collections::VecDeque, rc::Rc, string::String, vec::Vec};
+use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 use compact_str::CompactString;
-use fnv::FnvHasher;
-use futures::FutureExt;
 use hashbrown::HashMap;
 
-use core::{
-    hash::{Hash, Hasher},
-    pin::{Pin, pin},
-    task::{Context, Poll, Waker},
-};
+use core::hash::Hash;
 
 use misp_num::decimal::Decimal;
 use misp_parser::SExpr;
 
 use crate::{
-    builtin::{
-        combinatorics::{builtin_combinations, builtin_factorial, builtin_permutations},
-        control::builtin_if,
-        func::{builtin_func, builtin_lambda},
-        math::{
-            builtin_abs, builtin_add, builtin_divide, builtin_equal, builtin_gt, builtin_gte,
-            builtin_lt, builtin_lte, builtin_max, builtin_min, builtin_minus, builtin_multiply,
-            builtin_not_equal, builtin_pow, builtin_sqrt, builtin_summate,
-        },
+    // builtin::{
+    //     combinatorics::{builtin_combinations, builtin_factorial, builtin_permutations},
+    //     control::builtin_if,
+    //     func::{builtin_func, builtin_lambda},
+    //     math::{
+    //         builtin_abs, builtin_add, builtin_divide, builtin_equal, builtin_gt, builtin_gte,
+    //         builtin_lt, builtin_lte, builtin_max, builtin_min, builtin_minus, builtin_multiply,
+    //         builtin_not_equal, builtin_pow, builtin_sqrt, builtin_summate,
+    //     },
+    // },
+    builtin::math::{
+        builtin_abs, builtin_add, builtin_divide, builtin_minus, builtin_multiply, builtin_sqrt,
     },
     config::Config,
-    environment::{Environment, Scope},
-    future::{EvalFuture, EvalFutureContext},
+    environment::Environment,
+    instruction::Instruction,
 };
 
 #[derive(Debug, Clone, Hash)]
@@ -43,8 +40,7 @@ pub struct Lambda {
     pub body: Box<Value>,
 }
 
-type NativeMispFuture = Pin<Box<dyn Future<Output = Result<Value, Error>> + 'static>>;
-type NativeMispFunction = fn(*mut Executor) -> NativeMispFuture;
+type NativeMispFunction = fn(&mut Executor) -> Result<Value, Error>;
 
 #[derive(Debug, Clone, Hash)]
 pub struct RuntimeMispFunction {
@@ -84,28 +80,6 @@ pub struct MemoKey {
     pub args_hash: u64,
 }
 
-#[derive(Debug, Clone)]
-pub enum Instruction {
-    Push(Value),
-    Store(CompactString),
-    Load(CompactString),
-    Call(usize),
-    PushScope,
-    PushDefinedScope(Scope),
-    PopScope,
-    Resume(usize),
-    Await(usize),
-    Marker(usize),
-    MemoCheck {
-        id: usize,
-        params: Rc<Vec<CompactString>>,
-    },
-    MemoStore {
-        id: usize,
-        params: Rc<Vec<CompactString>>,
-    },
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Unknown Symbol: {0}")]
@@ -126,57 +100,38 @@ pub enum Error {
     EmptyStack,
 }
 
-pub struct Injector<'a> {
-    instructions: &'a mut VecDeque<Instruction>,
-    index: usize,
-}
-
-impl<'a> Injector<'a> {
-    pub fn new(instructions: &'a mut VecDeque<Instruction>) -> Self {
-        Self {
-            instructions,
-            index: 0,
-        }
-    }
-
-    #[inline(always)]
-    pub fn inject(&mut self, instruction: Instruction) {
-        self.instructions.insert(self.index, instruction);
-        self.index += 1;
-    }
+#[derive(Debug)]
+pub struct CallFrame {
+    return_pc: usize,
+    stack_base: usize,
 }
 
 pub struct Executor {
     pub config: Config,
     pub env: Environment,
-    pub instructions: VecDeque<Instruction>,
+    pub function_location: HashMap<usize, usize>,
+
+    pub instructions: Vec<Instruction>,
+    pub pc: usize,
     pub stack: Vec<Value>,
+    pub frames: Vec<CallFrame>,
 
     pub memos: HashMap<MemoKey, Value>,
     pub next_function_id: usize,
-
-    pub waker: &'static Waker,
-    pub futures: HashMap<usize, EvalFutureContext>,
-    pub native_futures: HashMap<usize, NativeMispFuture>,
-    pub next_future_id: usize,
 }
 
 impl Default for Executor {
     fn default() -> Self {
         let config = Config::default();
         let mut env = Environment::default();
-
-        env.push_scope();
-        env.set_prev(Value::Decimal(Decimal::ZERO));
-
         env.load_constants();
 
         // Functions
-        env.define_native_function("func", builtin_func);
-        env.define_native_function("lambda", builtin_lambda);
+        // env.define_native_function("func", builtin_func);
+        // env.define_native_function("lambda", builtin_lambda);
 
         // Control Functions
-        env.define_native_function("if", builtin_if);
+        // env.define_native_function("if", builtin_if);
 
         // Math Functions
         env.define_native_function("+", builtin_add);
@@ -184,23 +139,23 @@ impl Default for Executor {
         env.define_native_function("*", builtin_multiply);
         env.define_native_function("/", builtin_divide);
         // env.define_native_function("%", builtin_mod);
-        env.define_native_function("==", builtin_equal);
-        env.define_native_function("!=", builtin_not_equal);
-        env.define_native_function("<", builtin_lt);
-        env.define_native_function("<=", builtin_lte);
-        env.define_native_function(">", builtin_gt);
-        env.define_native_function(">=", builtin_gte);
+        // env.define_native_function("==", builtin_equal);
+        // env.define_native_function("!=", builtin_not_equal);
+        // env.define_native_function("<", builtin_lt);
+        // env.define_native_function("<=", builtin_lte);
+        // env.define_native_function(">", builtin_gt);
+        // env.define_native_function(">=", builtin_gte);
         env.define_native_function("abs", builtin_abs);
-        env.define_native_function("min", builtin_min);
-        env.define_native_function("max", builtin_max);
-        env.define_native_function("pow", builtin_pow);
+        // env.define_native_function("min", builtin_min);
+        // env.define_native_function("max", builtin_max);
+        // env.define_native_function("pow", builtin_pow);
         env.define_native_function("sqrt", builtin_sqrt);
-        env.define_native_function("summate", builtin_summate);
+        // env.define_native_function("summate", builtin_summate);
 
         // Combinatorics
-        env.define_native_function("factorial", builtin_factorial);
-        env.define_native_function("combinations", builtin_combinations);
-        env.define_native_function("permutations", builtin_permutations);
+        // env.define_native_function("factorial", builtin_factorial);
+        // env.define_native_function("combinations", builtin_combinations);
+        // env.define_native_function("permutations", builtin_permutations);
 
         // Trig Functions
         // env.define_native_function("sin", builtin_sin);
@@ -210,124 +165,104 @@ impl Default for Executor {
         // env.define_native_function("acos", builtin_acos);
         // env.define_native_function("atan", builtin_atan);
 
+        env.push_scope();
+        env.set_prev(Value::Decimal(Decimal::ZERO));
+
         Self {
             config,
             env,
-            instructions: VecDeque::default(),
+            function_location: HashMap::default(),
+            instructions: Vec::default(),
+            pc: 0,
             stack: Vec::default(),
             next_function_id: 0,
             memos: HashMap::default(),
-            waker: Waker::noop(),
-            futures: HashMap::default(),
-            native_futures: HashMap::default(),
-            next_future_id: 0,
+            frames: Vec::default(),
         }
     }
 }
 
 impl Executor {
-    pub fn compile(value: Value, injector: &mut Injector) -> Result<(), Error> {
+    fn compile_self(&mut self, value: Value) -> Result<usize, Error> {
+        self.compile_runtime_functions(&value)?;
+        let offset = self.instructions.len();
+
         match value {
-            Value::Atom(atom) => injector.inject(Instruction::Load(atom)),
+            Value::Atom(atom) => self.instructions.push(Instruction::Load(atom)),
             Value::Decimal(_) | Value::Function(_) => {
-                injector.inject(Instruction::Push(value));
+                self.instructions.push(Instruction::Push(value));
             }
-            Value::List(mut values) => {
-                let arity = values.len() - 1;
+            Value::List(values) => {
+                if let Some(Value::Atom(name)) = values.first() {
+                    match name.as_str() {
+                        "func" => {
+                            if values.len() != 4 {
+                                panic!("func arity");
+                            }
 
-                let mut drain = values.drain(0..values.len());
-                let Value::Atom(name) = drain.next().unwrap() else {
-                    return Err(Error::InvalidType);
-                };
+                            let mut iter = values.into_iter();
+                            iter.next();
 
-                for param in drain {
-                    injector.inject(Instruction::Push(param));
+                            let Value::Atom(name) = iter.next().unwrap() else {
+                                panic!("wrong func type")
+                            };
+
+                            let params = match iter.next().unwrap() {
+                                Value::List(param_list) => param_list
+                                    .into_iter()
+                                    .map(|p| match p {
+                                        Value::Atom(param) => Ok(param.clone()),
+                                        _ => Err(Error::InvalidType),
+                                    })
+                                    .collect::<Result<Vec<_>, _>>()?,
+                                _ => return Err(Error::InvalidType),
+                            };
+
+                            let body = iter.next().unwrap();
+
+                            let function_id = self.next_function_id;
+                            self.next_function_id += 1;
+
+                            let rt_func = RuntimeMispFunction {
+                                id: function_id,
+                                params: params.into(),
+                                body: body.into(),
+                            };
+
+                            let function = Value::Function(Function::Runtime(rt_func));
+                            self.env.set_global(name, function.clone());
+
+                            self.instructions.push(Instruction::Push(function));
+                        }
+                        _ => {
+                            let arity = (values.len() - 1) as u64;
+
+                            let mut iter = values.into_iter();
+                            let Value::Atom(name) = iter.next().unwrap() else {
+                                return Err(Error::InvalidType);
+                            };
+
+                            for param in iter {
+                                self.compile_self(param.clone())?;
+                            }
+
+                            let Value::Function(func) =
+                                self.env.get(&name).ok_or(Error::UnknownSymbol(name))?
+                            else {
+                                return Err(Error::InvalidType);
+                            };
+
+                            self.instructions
+                                .push(Instruction::Push(Value::Decimal(arity.into())));
+
+                            self.instructions.push(Instruction::Call(func.clone()));
+                        }
+                    }
                 }
-
-                injector.inject(Instruction::Load(name));
-                injector.inject(Instruction::Call(arity));
             }
         }
 
-        Ok(())
-    }
-
-    pub fn compile_function(&mut self, function: Function) -> Result<(), Error> {
-        match function {
-            Function::Native(f) => {
-                let mut native_future = f(self);
-
-                match native_future.poll_unpin(&mut Context::from_waker(self.waker)) {
-                    Poll::Ready(value) => {
-                        let value = value?;
-                        self.stack.push(value);
-                        return Ok(());
-                    }
-                    Poll::Pending => {
-                        let future_id = self.next_future_id;
-                        self.next_future_id += 1;
-
-                        self.native_futures.insert(future_id, native_future);
-
-                        let mut injector = Injector::new(&mut self.instructions);
-                        injector.inject(Instruction::Await(future_id));
-                    }
-                }
-            }
-            Function::Runtime(f) => {
-                arity_check!(self, "<func>", f.params.len());
-
-                let mut injector = Injector {
-                    instructions: &mut self.instructions,
-                    index: 0,
-                };
-
-                injector.inject(Instruction::PushScope);
-
-                // Reverse order ensures the correct value->name binding here.
-                for param in f.params.iter().rev() {
-                    Self::compile(self.stack.pop().unwrap(), &mut injector)?;
-                    injector.inject(Instruction::Store(param.clone()));
-                }
-
-                injector.inject(Instruction::MemoCheck {
-                    id: f.id,
-                    params: f.params.clone(),
-                });
-
-                let body = (*f.body).clone();
-                Self::compile(body, &mut injector)?;
-
-                injector.inject(Instruction::MemoStore {
-                    id: f.id,
-                    params: f.params,
-                });
-
-                injector.inject(Instruction::Marker(f.id));
-                injector.inject(Instruction::PopScope);
-            }
-            Function::Lambda(l) => {
-                arity_check!(self, "<lambda>", l.params.len());
-
-                let mut injector = Injector {
-                    instructions: &mut self.instructions,
-                    index: 0,
-                };
-
-                injector.inject(Instruction::PushScope);
-
-                // Reverse order ensures the correct value->name binding here.
-                for param in l.params.into_iter().rev() {
-                    Self::compile(self.stack.pop().unwrap(), &mut injector)?;
-                    injector.inject(Instruction::Store(param));
-                }
-
-                Self::compile(*l.body, &mut injector)?;
-                injector.inject(Instruction::PopScope);
-            }
-        }
-
-        Ok(())
+        Ok(offset)
     }
 
     fn execute_instruction(self: &mut Executor, instruction: Instruction) -> Result<(), Error> {
@@ -335,11 +270,11 @@ impl Executor {
         //     extern crate std;
         //     use std::eprintln;
         //     eprintln!("Current Instruction: {instruction:?}");
-        //     eprintln!("Instructions: {:?}", self.instructions);
+        //     eprintln!("Current Program Counter: {}", self.pc - 1);
         //     eprintln!("Memos: {:?}", self.memos.keys());
         //     eprintln!("Stack: {:?}", self.stack);
-        //     eprintln!("Futures: {:?}", self.futures.keys());
-        //     eprintln!("Native Futures: {:?}", self.native_futures.keys());
+        //     eprintln!("Frames: {:?}", self.frames);
+        //     eprintln!("Scopes: {:?}", self.env.scopes.len());
         //     eprintln!();
         //     std::thread::sleep(std::time::Duration::from_secs(1));
         // }
@@ -355,17 +290,42 @@ impl Executor {
                 let value = self.env.get(&name).ok_or(Error::UnknownSymbol(name))?;
                 self.stack.push(value.clone());
             }
-            Instruction::Call(arity) => {
-                let func = self.stack.pop().unwrap();
+            Instruction::Call(func) => match func {
+                Function::Native(f) => {
+                    self.env.push_scope();
+                    let value = f(self)?;
+                    self.env.pop_scope();
 
-                match func {
-                    Value::Function(f) => {
-                        let arity_decimal = Decimal::from(arity as u64);
-                        self.stack.push(Value::Decimal(arity_decimal));
-                        self.compile_function(f)?;
-                    }
-                    _ => return Err(Error::FunctionNotFound),
+                    self.stack.push(value);
                 }
+                Function::Runtime(rt) => {
+                    let location = self
+                        .function_location
+                        .get(&rt.id)
+                        .expect("Function must have a location");
+
+                    let Value::Decimal(arity) = self.stack.pop().unwrap() else {
+                        return Err(Error::InvalidType);
+                    };
+
+                    if arity.to_u128() as usize != rt.params.len() {
+                        panic!("wrong arity in rt func");
+                    }
+
+                    self.frames.push(CallFrame {
+                        return_pc: self.pc,
+                        stack_base: self.stack.len(),
+                    });
+
+                    self.pc = *location;
+                }
+                Function::Lambda(lambda) => todo!(),
+            },
+
+            Instruction::Return => {
+                let frame = self.frames.pop().expect("Can't return without frame");
+                self.pc = frame.return_pc;
+                self.stack.truncate(frame.stack_base);
             }
             Instruction::PushScope => {
                 self.env.push_scope();
@@ -376,120 +336,65 @@ impl Executor {
             Instruction::PopScope => {
                 self.env.pop_scope();
             }
-            Instruction::Marker(_) => {}
-            Instruction::MemoCheck { id, params } => {
-                let mut hasher = FnvHasher::default();
-                for param in params.iter() {
-                    let value = self.env.get(param).unwrap();
-                    value.hash(&mut hasher);
-                }
-
-                let key = MemoKey {
-                    id,
-                    args_hash: hasher.finish(),
-                };
-
-                if let Some(value) = self.memos.get(&key) {
-                    // eprintln!("Cache Hit! {key:?} -> {value:?}");
-                    self.stack.push(value.clone());
-
-                    while let Some(instruction) = self.instructions.pop_front() {
-                        if matches!(instruction, Instruction::Marker(tag) if tag == id) {
-                            break;
-                        }
-                    }
-                }
-            }
-            Instruction::MemoStore { id, params } => {
-                let mut hasher = FnvHasher::default();
-                for param in params.iter() {
-                    let value = self.env.get(param).unwrap();
-                    value.hash(&mut hasher);
-                }
-
-                let key = MemoKey {
-                    id,
-                    args_hash: hasher.finish(),
-                };
-
-                let value = self.stack.last().unwrap();
-                self.memos.insert(key, value.clone());
-            }
-            Instruction::Resume(id) => {
-                let value = self.stack.pop().ok_or(Error::EmptyStack)?;
-
-                if let Some(ctx) = self.futures.get_mut(&id) {
-                    ctx.result = Some(Ok(value));
-
-                    if let Some(waker) = ctx.waker.take() {
-                        waker.wake();
-                    }
-                }
-            }
-            Instruction::Await(id) => {
-                let mut context = Context::from_waker(self.waker);
-
-                let future = self
-                    .native_futures
-                    .get_mut(&id)
-                    .expect("Native function doesnt exist");
-
-                match future.as_mut().poll(&mut context) {
-                    Poll::Ready(result) => {
-                        self.stack.push(result?);
-                        self.native_futures.remove(&id);
-                    }
-                    Poll::Pending => {
-                        self.instructions.insert(1, Instruction::Await(id));
-                    }
-                }
-            }
         }
 
         Ok(())
     }
 
-    async fn run_function(&mut self, func: Function, args: Vec<Value>) -> Result<Value, Error> {
-        let future_id = self.next_future_id;
-        self.next_future_id += 1;
-
-        let mut injector = Injector::new(&mut self.instructions);
-        let arity = args.len();
-        for arg in args {
-            injector.inject(Instruction::Push(arg));
+    fn compile_runtime_function(&mut self, rt: &RuntimeMispFunction) -> Result<(), Error> {
+        if self.function_location.get(&rt.id).is_some() {
+            return Ok(());
         }
 
-        injector.inject(Instruction::Push(Value::Function(func)));
-        injector.inject(Instruction::Call(arity));
-        injector.inject(Instruction::Resume(future_id));
+        let start_location = self.instructions.len();
 
-        self.futures.insert(future_id, EvalFutureContext::default());
+        self.instructions.push(Instruction::PushScope);
 
-        EvalFuture {
-            id: future_id,
-            executor: self as *mut Executor,
+        for param in rt.params.iter().rev() {
+            self.instructions.push(Instruction::Store(param.clone()));
         }
-        .await
+
+        self.compile_self((*rt.body).clone())?;
+
+        self.instructions.push(Instruction::PopScope);
+        self.instructions.push(Instruction::Return);
+
+        self.function_location.insert(rt.id, start_location);
+
+        Ok(())
     }
 
-    pub fn eval(&mut self, expr: Value) -> EvalFuture {
-        let future_id = self.next_future_id;
-        self.next_future_id += 1;
+    fn compile_runtime_functions(&mut self, value: &Value) -> Result<(), Error> {
+        match value {
+            Value::Atom(name) => {
+                let Some(Value::Function(Function::Runtime(rt))) = self.env.get(name).cloned()
+                else {
+                    return Ok(());
+                };
 
-        let mut injector = Injector::new(&mut self.instructions);
-        Self::compile(expr, &mut injector).unwrap();
-        injector.inject(Instruction::Resume(future_id));
-
-        self.futures.insert(future_id, EvalFutureContext::default());
-
-        EvalFuture {
-            id: future_id,
-            executor: self as *mut Executor,
+                self.compile_runtime_function(&rt)?;
+            }
+            Value::List(values) => {
+                for value in values {
+                    self.compile_runtime_functions(value)?;
+                }
+            }
+            _ => {}
         }
+
+        Ok(())
+    }
+
+    pub fn compile(&mut self, value: Value) -> Result<(usize, Vec<Instruction>), Error> {
+        let pc = self.compile_self(value)?;
+        Ok((pc, self.instructions.clone()))
     }
 
     pub fn execute(&mut self, value: Value) -> Result<Value, Error> {
-        self.memos.clear();
+        self.pc = 0;
+        self.instructions.clear();
+        self.frames.clear();
+        self.function_location.clear();
 
         match value {
             Value::Atom(name) => {
@@ -506,24 +411,17 @@ impl Executor {
                 Ok(value)
             }
             _ => {
-                let future = self.eval(value);
-                let mut main_future = pin!(future);
-                let mut context = Context::from_waker(self.waker);
+                self.pc = self.compile_self(value)?;
 
-                loop {
-                    while let Some(instruction) = self.instructions.pop_front() {
-                        self.execute_instruction(instruction)?;
-                    }
-
-                    match main_future.as_mut().poll(&mut context) {
-                        Poll::Ready(result) => {
-                            let result = result?;
-                            self.env.set_prev(result.clone());
-                            return Ok(result);
-                        }
-                        Poll::Pending => continue,
-                    }
+                while self.pc < self.instructions.len() {
+                    let current_pc = self.pc;
+                    self.pc += 1;
+                    let instr = self.instructions[current_pc].clone();
+                    self.execute_instruction(instr)?;
                 }
+
+                let value = self.stack.pop().expect("Execute must return a value");
+                Ok(value)
             }
         }
     }
