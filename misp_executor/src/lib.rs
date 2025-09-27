@@ -383,12 +383,12 @@ impl Executor {
             self.instructions.push(Instruction::Store(param.clone()));
         }
 
+        self.function_location.insert(rt.id, start_location);
+
         self.compile_self((*rt.body).clone())?;
 
         self.instructions.push(Instruction::PopScope);
         self.instructions.push(Instruction::Return);
-
-        self.function_location.insert(rt.id, start_location);
 
         Ok(())
     }
