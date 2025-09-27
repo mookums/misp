@@ -17,20 +17,7 @@ use misp_num::decimal::Decimal;
 use misp_parser::SExpr;
 
 use crate::{
-    // builtin::{
-    //     combinatorics::{builtin_combinations, builtin_factorial, builtin_permutations},
-    //     control::builtin_if,
-    //     func::{builtin_func, builtin_lambda},
-    //     math::{
-    //         builtin_abs, builtin_add, builtin_divide, builtin_equal, builtin_gt, builtin_gte,
-    //         builtin_lt, builtin_lte, builtin_max, builtin_min, builtin_minus, builtin_multiply,
-    //         builtin_not_equal, builtin_pow, builtin_sqrt, builtin_summate,
-    //     },
-    // },
-    cas::CasOperation,
-    config::Config,
-    environment::Environment,
-    instruction::Instruction,
+    cas::CasOperation, config::Config, environment::Environment, instruction::Instruction,
 };
 
 #[derive(Debug, Clone, Hash, PartialEq)]
@@ -372,12 +359,12 @@ impl Executor {
             Instruction::Sub => variadic_op!(self, -),
             Instruction::Mult => variadic_op!(self, *),
             Instruction::Div => variadic_op!(self, /),
-            Instruction::Eq => variadic_comparison!(self, ==),
-            Instruction::Neq => variadic_comparison!(self, !=),
-            Instruction::Gt => variadic_comparison!(self, >),
-            Instruction::Gte => variadic_comparison!(self, >=),
-            Instruction::Lt => variadic_comparison!(self, <),
-            Instruction::Lte => variadic_comparison!(self, <=),
+            Instruction::Eq => binary_comparison!(self, ==),
+            Instruction::Neq => binary_comparison!(self, !=),
+            Instruction::Gt => binary_comparison!(self, >),
+            Instruction::Gte => binary_comparison!(self, >=),
+            Instruction::Lt => binary_comparison!(self, <),
+            Instruction::Lte => binary_comparison!(self, <=),
         }
 
         Ok(())

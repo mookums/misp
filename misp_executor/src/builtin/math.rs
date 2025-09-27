@@ -18,10 +18,10 @@ macro_rules! variadic_op {
                 return Err(Error::InvalidType);
             }
 
-            let values = &mut values[..arity];
+            let values = &mut values[..=arity];
             let mut acc = values[0];
 
-            for value in values.iter_mut().skip(1).rev() {
+            for value in values.iter_mut().skip(1) {
                 let thunk = $e.stack.pop().unwrap();
                 *value = match thunk {
                     Value::Decimal(val) => val,
@@ -37,34 +37,25 @@ macro_rules! variadic_op {
 }
 
 #[macro_export]
-macro_rules! variadic_comparison {
-    ($e:expr, $op:tt) => {
-        {
-            let Value::Decimal(arg_count) = $e.stack.pop().ok_or(Error::EmptyStack)?
-            else {
-                return Err(Error::InvalidType);
-            };
+macro_rules! binary_comparison {
+    ($e:expr, $op:tt) => {{
+        let Value::Decimal(arity) = $e.stack.pop().ok_or(Error::EmptyStack)? else {
+            return Err(Error::InvalidType);
+        };
 
-            let count = arg_count.to_u128() as usize;
-            let mut prev = None;
+        debug_assert_eq!(arity.to_u128(), 2);
 
-            for _ in 0..count {
-                let thunk = $e.stack.pop().ok_or(Error::EmptyStack)?;
+        let Value::Decimal(right) = $e.stack.pop().ok_or(Error::EmptyStack)? else {
+            return Err(Error::InvalidType);
+        };
 
-                let Value::Decimal(value) = thunk else {
-                        return Err(Error::InvalidType);
-                };
+        let Value::Decimal(left) = $e.stack.pop().ok_or(Error::EmptyStack)? else {
+            return Err(Error::InvalidType);
+        };
 
-                if let Some(prev_value) = prev && Decimal::from(value $op prev_value) != Decimal::ONE {
-                    $e.stack.push(Value::Decimal(Decimal::ZERO))
-                }
-
-                prev = Some(value)
-            }
-
-            $e.stack.push(Value::Decimal(Decimal::ONE));
-        }
-    };
+        let result = Decimal::from(left $op right);
+        $e.stack.push(Value::Decimal(result));
+    }};
 }
 
 // pub fn builtin_mod(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
