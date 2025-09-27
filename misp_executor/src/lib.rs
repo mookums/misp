@@ -2,6 +2,7 @@
 extern crate alloc;
 
 mod builtin;
+pub mod cas;
 pub mod config;
 pub mod environment;
 pub mod instruction;
@@ -26,37 +27,54 @@ use crate::{
     //         builtin_not_equal, builtin_pow, builtin_sqrt, builtin_summate,
     //     },
     // },
-    builtin::math::{builtin_abs, builtin_pow, builtin_sqrt},
+    cas::CasOperation,
     config::Config,
     environment::Environment,
     instruction::Instruction,
 };
 
-#[derive(Debug, Clone, Hash)]
+#[derive(Debug, Clone, Hash, PartialEq)]
 pub struct Lambda {
     pub params: Vec<CompactString>,
     pub body: Box<Value>,
 }
 
-type NativeMispFunction = fn(&mut Executor) -> Result<Value, Error>;
+#[derive(Debug, Clone, Eq)]
+pub struct NativeMispFunction {
+    pub id: usize,
+    pub func: fn(&mut Executor) -> Result<Value, Error>,
+}
 
-#[derive(Debug, Clone, Hash)]
+impl PartialEq for NativeMispFunction {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Hash for NativeMispFunction {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq)]
 pub struct RuntimeMispFunction {
     pub id: usize,
     pub params: Rc<Vec<CompactString>>,
     pub body: Rc<Value>,
 }
 
-#[derive(Debug, Clone, Hash)]
+#[derive(Debug, Clone, Hash, PartialEq)]
 pub enum Function {
     Native(NativeMispFunction),
     Runtime(RuntimeMispFunction),
     Lambda(Lambda),
 }
 
-#[derive(Debug, Clone, Hash)]
+#[derive(Debug, Clone, Hash, PartialEq)]
 pub enum Value {
     Atom(CompactString),
+    Symbol(CompactString),
     List(Vec<Value>),
     Decimal(Decimal),
     Function(Function),
@@ -139,9 +157,9 @@ impl Default for Executor {
         // env.define_native_function("%", builtin_mod);
         // env.define_native_function("min", builtin_min);
         // env.define_native_function("max", builtin_max);
-        env.define_native_function("abs", builtin_abs);
-        env.define_native_function("pow", builtin_pow);
-        env.define_native_function("sqrt", builtin_sqrt);
+        // env.define_native_function("abs", builtin_abs);
+        // env.define_native_function("pow", builtin_pow);
+        // env.define_native_function("sqrt", builtin_sqrt);
         // env.define_native_function("summate", builtin_summate);
 
         // Combinatorics
@@ -181,7 +199,7 @@ impl Executor {
 
         match value {
             Value::Atom(atom) => self.instructions.push(Instruction::Load(atom)),
-            Value::Decimal(_) | Value::Function(_) => {
+            Value::Decimal(_) | Value::Function(_) | Value::Symbol(_) => {
                 self.instructions.push(Instruction::Push(value));
             }
             Value::List(values) => {
@@ -226,6 +244,13 @@ impl Executor {
 
                             self.instructions.push(Instruction::Push(function));
                         }
+                        "simplify" => {
+                            let arg = values[1].clone();
+
+                            self.instructions.push(Instruction::Push(arg));
+                            self.instructions
+                                .push(Instruction::Cas(CasOperation::Simplify));
+                        }
                         "+" => variadic_instruction!(self, values, Add),
                         "-" => variadic_instruction!(self, values, Sub),
                         "*" => variadic_instruction!(self, values, Mult),
@@ -248,9 +273,7 @@ impl Executor {
                                 self.compile_self(param.clone())?;
                             }
 
-                            let Value::Function(func) =
-                                self.env.get(&name).ok_or(Error::UnknownSymbol(name))?
-                            else {
+                            let Value::Function(func) = self.env.get(&name) else {
                                 return Err(Error::InvalidType);
                             };
 
@@ -289,13 +312,13 @@ impl Executor {
                 self.env.set(name, self.stack.pop().unwrap());
             }
             Instruction::Load(name) => {
-                let value = self.env.get(&name).ok_or(Error::UnknownSymbol(name))?;
+                let value = self.env.get(&name);
                 self.stack.push(value.clone());
             }
             Instruction::Call(func) => match func {
-                Function::Native(f) => {
+                Function::Native(native) => {
                     self.env.push_scope();
-                    let value = f(self)?;
+                    let value = (native.func)(self)?;
                     self.env.pop_scope();
 
                     self.stack.push(value);
@@ -338,6 +361,13 @@ impl Executor {
             Instruction::PopScope => {
                 self.env.pop_scope();
             }
+            Instruction::Cas(op) => {
+                let result = match op {
+                    CasOperation::Simplify => cas::simplify::builtin_simplify(self)?,
+                };
+
+                self.stack.push(result);
+            }
             Instruction::Add => variadic_op!(self, +),
             Instruction::Sub => variadic_op!(self, -),
             Instruction::Mult => variadic_op!(self, *),
@@ -379,8 +409,7 @@ impl Executor {
     fn compile_runtime_functions(&mut self, value: &Value) -> Result<(), Error> {
         match value {
             Value::Atom(name) => {
-                let Some(Value::Function(Function::Runtime(rt))) = self.env.get(name).cloned()
-                else {
+                let Value::Function(Function::Runtime(rt)) = self.env.get(name) else {
                     return Ok(());
                 };
 
@@ -412,13 +441,10 @@ impl Executor {
 
         match value {
             Value::Atom(name) => {
-                if let Some(val) = self.env.get(&name) {
-                    let result = val.clone();
-                    self.env.set_prev(result.clone());
-                    Ok(result)
-                } else {
-                    Err(Error::UnknownSymbol(name))
-                }
+                let val = self.env.get(&name);
+                let result = val.clone();
+                self.env.set_prev(result.clone());
+                Ok(result)
             }
             Value::Decimal(_) => {
                 self.env.set_prev(value.clone());

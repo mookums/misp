@@ -2,7 +2,7 @@ use core::fmt::Display;
 
 use compact_str::CompactString;
 
-use crate::{Function, Value, environment::Scope};
+use crate::{Function, Value, cas::CasOperation, environment::Scope};
 
 #[derive(Debug, Clone)]
 pub enum Instruction {
@@ -25,6 +25,7 @@ pub enum Instruction {
     Gte,
     Lt,
     Lte,
+    Cas(CasOperation),
 }
 
 impl Display for Instruction {

@@ -116,14 +116,14 @@ impl Environment {
             .insert(name.to_compact_string(), value);
     }
 
-    pub fn get(&self, name: &CompactString) -> Option<&Value> {
+    pub fn get(&self, name: &CompactString) -> Value {
         // Searches from the current scope up, trying to match the variable.
         for scope in self.scopes.iter().rev() {
             if let Some(value) = scope.bindings.get(name) {
-                return Some(value);
+                return value.clone();
             }
         }
 
-        None
+        Value::Symbol(name.clone())
     }
 }

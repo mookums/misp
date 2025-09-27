@@ -51,7 +51,8 @@ impl Misp {
 
     pub fn print(value: &Value) -> String {
         match value {
-            Value::Atom(s) => s.to_string(),
+            Value::Atom(s) => format!("'{}'", s),
+            Value::Symbol(s) => s.to_string(),
             Value::List(exprs) => {
                 let items: Vec<String> = exprs.iter().map(Self::print).collect();
                 format!("({})", items.join(" "))
