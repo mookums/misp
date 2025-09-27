@@ -231,6 +231,34 @@ impl Executor {
 
                             self.instructions.push(Instruction::Push(function));
                         }
+                        "if" => {
+                            if values.len() != 4 {
+                                panic!("if arity");
+                            }
+
+                            let mut iter = values.into_iter();
+                            iter.next();
+
+                            let condition = iter.next().unwrap();
+                            let then_expr = iter.next().unwrap();
+                            let else_expr = iter.next().unwrap();
+
+                            self.compile_self(condition)?;
+
+                            let jz_to_else = self.instructions.len();
+                            self.instructions.push(Instruction::Placeholder);
+
+                            self.compile_self(then_expr)?;
+                            let jmp_past_else = self.instructions.len();
+                            self.instructions.push(Instruction::Placeholder);
+
+                            let else_start = self.instructions.len();
+                            self.compile_self(else_expr)?;
+
+                            let end = self.instructions.len();
+                            self.instructions[jz_to_else] = Instruction::Jz(else_start);
+                            self.instructions[jmp_past_else] = Instruction::Jmp(end);
+                        }
                         "simplify" => {
                             let arg = values[1].clone();
 
@@ -292,6 +320,7 @@ impl Executor {
         // }
 
         match instruction {
+            Instruction::Placeholder => unreachable!(),
             Instruction::Push(value) => {
                 self.stack.push(value);
             }
@@ -333,7 +362,6 @@ impl Executor {
                 }
                 Function::Lambda(_) => todo!(),
             },
-
             Instruction::Return => {
                 let frame = self.frames.pop().expect("Can't return without frame");
                 self.pc = frame.return_pc;
@@ -347,6 +375,18 @@ impl Executor {
             }
             Instruction::PopScope => {
                 self.env.pop_scope();
+            }
+            Instruction::Jmp(pc) => {
+                self.pc = pc;
+            }
+            Instruction::Jz(pc) => {
+                let Value::Decimal(n) = self.stack.pop().ok_or(Error::EmptyStack)? else {
+                    return Err(Error::InvalidType);
+                };
+
+                if n == Decimal::ZERO {
+                    self.pc = pc;
+                }
             }
             Instruction::Cas(op) => {
                 let result = match op {

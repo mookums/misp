@@ -8,29 +8,29 @@ macro_rules! variadic_op {
         {
             const MAX_VARIADIC_ARGS: usize = 16;
             let mut values: [Decimal; MAX_VARIADIC_ARGS] = [const { Decimal::ZERO }; MAX_VARIADIC_ARGS];
-
             let Value::Decimal(arg_count) = $e.stack.pop().ok_or(Error::EmptyStack)? else {
                 return Err(Error::InvalidType);
             };
-
             let arity = arg_count.to_u128() as usize;
             if arity == 0 {
                 return Err(Error::InvalidType);
             }
 
-            let values = &mut values[..=arity];
-            let mut acc = values[0];
-
-            for value in values.iter_mut().skip(1) {
+            // Pop ALL arguments from stack
+            for i in (0..arity).rev() {
                 let thunk = $e.stack.pop().unwrap();
-                *value = match thunk {
+                values[i] = match thunk {
                     Value::Decimal(val) => val,
                     _ => return Err(Error::InvalidType),
                 };
-
-                acc += *value;
             }
 
+            let mut acc = values[0];
+
+            #[allow(clippy::assign_op_pattern)]
+            for value in &values[1..arity] {
+                acc = acc $op *value;
+            }
             $e.stack.push(Value::Decimal(acc));
         }
     };

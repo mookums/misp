@@ -14,6 +14,9 @@ pub enum Instruction {
     PushScope,
     PushDefinedScope(Scope),
     PopScope,
+    // Control Flow
+    Jmp(usize),
+    Jz(usize),
     // Arith Instructions
     Add,
     Sub,
@@ -25,7 +28,9 @@ pub enum Instruction {
     Gte,
     Lt,
     Lte,
+    // Cas
     Cas(CasOperation),
+    Placeholder,
 }
 
 impl Display for Instruction {
