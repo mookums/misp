@@ -78,10 +78,29 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| misp.eval("(fib 10)").unwrap());
     });
 
+    c.bench_function("interp runtime fibonacci (tail)", |b| {
+        misp.eval("(func fibTailHelper (n a b) (if (<= n 0) a (fibTailHelper (- n 1) b (+ a b))))")
+            .unwrap();
+        misp.eval("(func fibTail (n) (if (<= n 1) n (fibTail n 0 1)))")
+            .unwrap();
+        b.iter(|| misp.eval("(fibTail 10)").unwrap());
+    });
+
     c.bench_function("interp runtime factorial", |b| {
         misp.eval("(func factorialRuntime (n) (if (<= n 1) 1 (* n (factorialRuntime (- n 1)))))")
             .unwrap();
         b.iter(|| misp.eval("(factorialRuntime 1000)").unwrap());
+    });
+
+    c.bench_function("interp runtime factorial (tail)", |b| {
+        misp.eval(
+            "(func factorialTailHelper (n acc) (if (== n 0) acc (factorialTailHelper (- n 1) (* n acc))))",
+        )
+        .unwrap();
+        misp.eval("(func factorialTail (n) (factorialTailHelper n 1))")
+            .unwrap();
+
+        b.iter(|| misp.eval("(factorialTail 1000)").unwrap());
     });
 
     // c.bench_function("interp builtin factorial", |b| {

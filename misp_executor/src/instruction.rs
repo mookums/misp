@@ -9,11 +9,9 @@ pub enum Instruction {
     Push(Value),
     Store(CompactString),
     Load(CompactString),
+    TailCall(Function),
     Call(Function),
     Return,
-    PushScope,
-    PushDefinedScope(Scope),
-    PopScope,
     // Control Flow
     Jmp(usize),
     Jz(usize),
@@ -40,9 +38,6 @@ impl Display for Instruction {
             Instruction::Store(str) => write!(f, "Store({str})"),
             Instruction::Load(str) => write!(f, "Load({str})"),
             Instruction::Call(func) => write!(f, "Call({func:?})"),
-            Instruction::PushScope => write!(f, "PushScope"),
-            Instruction::PushDefinedScope(_) => write!(f, "PushDefinedScope"),
-            Instruction::PopScope => write!(f, "PopScope"),
             _ => write!(f, "{self:?}"),
         }
     }
@@ -54,7 +49,7 @@ macro_rules! variadic_instruction {
         let arity = ($values.len() - 1) as u64;
 
         for param in $values.into_iter().skip(1) {
-            $e.compile_self(param.clone())?;
+            $e.compile_value(param.clone(), false)?;
         }
 
         $e.instructions

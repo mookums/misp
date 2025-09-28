@@ -7,9 +7,14 @@ pub mod config;
 pub mod environment;
 pub mod instruction;
 
-use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
+use alloc::{
+    boxed::Box,
+    rc::Rc,
+    string::{String, ToString},
+    vec::Vec,
+};
 use compact_str::CompactString;
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 
 use core::hash::Hash;
 
@@ -26,11 +31,37 @@ pub struct Lambda {
     pub body: Box<Value>,
 }
 
-#[derive(Debug, Clone, Hash, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct RuntimeMispFunction {
     pub id: usize,
     pub params: Rc<Vec<CompactString>>,
     pub body: Rc<Value>,
+}
+
+impl PartialEq for RuntimeMispFunction {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for RuntimeMispFunction {}
+
+impl Hash for RuntimeMispFunction {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl Ord for RuntimeMispFunction {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.id.cmp(&other.id)
+    }
+}
+
+impl PartialOrd for RuntimeMispFunction {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq)]
@@ -161,10 +192,7 @@ impl Default for Executor {
 }
 
 impl Executor {
-    fn compile_self(&mut self, value: Value) -> Result<usize, Error> {
-        self.compile_runtime_functions(&value)?;
-        let offset = self.instructions.len();
-
+    fn compile_value(&mut self, value: Value, is_tail: bool) -> Result<(), Error> {
         match value {
             Value::Atom(atom) => self.instructions.push(Instruction::Load(atom)),
             Value::Decimal(_) | Value::Function(_) | Value::Symbol(_) => {
@@ -224,17 +252,17 @@ impl Executor {
                             let then_expr = iter.next().unwrap();
                             let else_expr = iter.next().unwrap();
 
-                            self.compile_self(condition)?;
+                            self.compile_value(condition, false)?;
 
                             let jz_to_else = self.instructions.len();
                             self.instructions.push(Instruction::Placeholder);
 
-                            self.compile_self(then_expr)?;
+                            self.compile_value(then_expr, is_tail)?;
                             let jmp_past_else = self.instructions.len();
                             self.instructions.push(Instruction::Placeholder);
 
                             let else_start = self.instructions.len();
-                            self.compile_self(else_expr)?;
+                            self.compile_value(else_expr, is_tail)?;
 
                             let end = self.instructions.len();
                             self.instructions[jz_to_else] = Instruction::Jz(else_start);
@@ -266,7 +294,7 @@ impl Executor {
                             };
 
                             for param in iter {
-                                self.compile_self(param.clone())?;
+                                self.compile_value(param.clone(), false)?;
                             }
 
                             let Value::Function(func) = self.env.get(&name) else {
@@ -276,14 +304,86 @@ impl Executor {
                             self.instructions
                                 .push(Instruction::Push(Value::Decimal(arity.into())));
 
-                            self.instructions.push(Instruction::Call(func.clone()));
+                            if is_tail {
+                                self.instructions.push(Instruction::TailCall(func.clone()));
+                            } else {
+                                self.instructions.push(Instruction::Call(func.clone()));
+                            }
                         }
                     }
                 }
             }
         }
 
+        Ok(())
+    }
+
+    fn compile_self(&mut self, value: Value, is_tail: bool) -> Result<usize, Error> {
+        self.discover_and_compile_rt_funcs(&value)?;
+        let offset = self.instructions.len();
+        self.compile_value(value, is_tail)?;
         Ok(offset)
+    }
+
+    pub fn compile(&mut self, value: Value) -> Result<(usize, Vec<Instruction>), Error> {
+        self.pc = 0;
+        self.instructions.clear();
+        self.frames.clear();
+        self.function_location.clear();
+
+        let pc = self.compile_self(value, false)?;
+        Ok((pc, self.instructions.clone()))
+    }
+
+    fn discover_rt_funcs(
+        &mut self,
+        value: &Value,
+        discovered: &mut HashSet<RuntimeMispFunction>,
+    ) -> Result<(), Error> {
+        match value {
+            Value::Atom(name) => {
+                let Value::Function(Function::Runtime(rt)) = self.env.get(name) else {
+                    return Ok(());
+                };
+
+                if discovered.insert(rt.clone()) {
+                    self.discover_rt_funcs(&rt.body, discovered)?;
+                }
+            }
+            Value::List(values) => {
+                for subvalue in values {
+                    self.discover_rt_funcs(subvalue, discovered)?;
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    fn discover_and_compile_rt_funcs(&mut self, value: &Value) -> Result<(), Error> {
+        let mut discovered = HashSet::new();
+        self.discover_rt_funcs(value, &mut discovered)?;
+
+        for rt in discovered {
+            if self.function_location.get(&rt.id).is_some() {
+                return Ok(());
+            }
+
+            let start_location = self.instructions.len();
+
+            for param in rt.params.iter().rev() {
+                self.instructions.push(Instruction::Store(param.clone()));
+            }
+
+            self.function_location.insert(rt.id, start_location);
+
+            self.compile_value((*rt.body).clone(), true)?;
+
+            self.instructions.push(Instruction::Return);
+        }
+
+        Ok(())
     }
 
     fn execute_instruction(self: &mut Executor, instruction: Instruction) -> Result<(), Error> {
@@ -296,6 +396,7 @@ impl Executor {
         //     eprintln!("Stack: {:?}", self.stack);
         //     eprintln!("Frames: {:?}", self.frames);
         //     eprintln!("Scopes: {:?}", self.env.scopes.len());
+        //     eprintln!("Locations: {:?}", self.function_location);
         //     eprintln!();
         //     std::thread::sleep(std::time::Duration::from_secs(1));
         // }
@@ -323,8 +424,14 @@ impl Executor {
                         return Err(Error::InvalidType);
                     };
 
+                    let arity_usize = arity.to_u128() as usize;
+
                     if arity.to_u128() as usize != rt.params.len() {
-                        panic!("wrong arity in rt func");
+                        return Err(Error::FunctionArity {
+                            name: "<func>".to_string(),
+                            expected: arity_usize,
+                            actual: rt.params.len(),
+                        });
                     }
 
                     self.frames.push(CallFrame {
@@ -332,6 +439,31 @@ impl Executor {
                         stack_base: self.stack.len(),
                     });
 
+                    self.env.push_scope();
+                    self.pc = *location;
+                }
+                Function::Lambda(_) => todo!(),
+            },
+            Instruction::TailCall(func) => match func {
+                Function::Runtime(rt) => {
+                    let location = self
+                        .function_location
+                        .get(&rt.id)
+                        .expect("Function must have a location");
+
+                    let frame = self.frames.last().expect("Must have a last frame");
+
+                    let Value::Decimal(arity) = self.stack.pop().unwrap() else {
+                        return Err(Error::InvalidType);
+                    };
+
+                    let new_args: Vec<Value> = self
+                        .stack
+                        .split_off(self.stack.len() - arity.to_u128() as usize);
+
+                    self.stack.truncate(frame.stack_base);
+
+                    self.stack.extend(new_args);
                     self.pc = *location;
                 }
                 Function::Lambda(_) => todo!(),
@@ -340,14 +472,6 @@ impl Executor {
                 let frame = self.frames.pop().expect("Can't return without frame");
                 self.pc = frame.return_pc;
                 self.stack.truncate(frame.stack_base);
-            }
-            Instruction::PushScope => {
-                self.env.push_scope();
-            }
-            Instruction::PushDefinedScope(scope) => {
-                self.env.push_given_scope(scope);
-            }
-            Instruction::PopScope => {
                 self.env.pop_scope();
             }
             Instruction::Jmp(pc) => {
@@ -384,58 +508,8 @@ impl Executor {
         Ok(())
     }
 
-    fn compile_runtime_function(&mut self, rt: &RuntimeMispFunction) -> Result<(), Error> {
-        if self.function_location.get(&rt.id).is_some() {
-            return Ok(());
-        }
-
-        let start_location = self.instructions.len();
-
-        self.instructions.push(Instruction::PushScope);
-
-        for param in rt.params.iter().rev() {
-            self.instructions.push(Instruction::Store(param.clone()));
-        }
-
-        self.function_location.insert(rt.id, start_location);
-
-        self.compile_self((*rt.body).clone())?;
-
-        self.instructions.push(Instruction::PopScope);
-        self.instructions.push(Instruction::Return);
-
-        Ok(())
-    }
-
-    fn compile_runtime_functions(&mut self, value: &Value) -> Result<(), Error> {
-        match value {
-            Value::Atom(name) => {
-                let Value::Function(Function::Runtime(rt)) = self.env.get(name) else {
-                    return Ok(());
-                };
-
-                self.compile_runtime_function(&rt)?;
-            }
-            Value::List(values) => {
-                for value in values {
-                    self.compile_runtime_functions(value)?;
-                }
-            }
-            _ => {}
-        }
-
-        Ok(())
-    }
-
-    pub fn compile(&mut self, value: Value) -> Result<(usize, Vec<Instruction>), Error> {
-        let pc = self.compile_self(value)?;
-        Ok((pc, self.instructions.clone()))
-    }
-
     pub fn execute(&mut self, value: Value) -> Result<Value, Error> {
         self.pc = 0;
-        self.next_function_id = 0;
-
         self.instructions.clear();
         self.frames.clear();
         self.function_location.clear();
@@ -452,7 +526,9 @@ impl Executor {
                 Ok(value)
             }
             _ => {
-                self.pc = self.compile_self(value)?;
+                let pc = self.compile_self(value, false)?;
+
+                self.pc = pc;
 
                 while self.pc < self.instructions.len() {
                     let current_pc = self.pc;
