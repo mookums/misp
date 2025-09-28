@@ -26,24 +26,6 @@ pub struct Lambda {
     pub body: Box<Value>,
 }
 
-#[derive(Debug, Clone, Eq)]
-pub struct NativeMispFunction {
-    pub id: usize,
-    pub func: fn(&mut Executor) -> Result<Value, Error>,
-}
-
-impl PartialEq for NativeMispFunction {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Hash for NativeMispFunction {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
-
 #[derive(Debug, Clone, Hash, PartialEq)]
 pub struct RuntimeMispFunction {
     pub id: usize,
@@ -53,7 +35,6 @@ pub struct RuntimeMispFunction {
 
 #[derive(Debug, Clone, Hash, PartialEq)]
 pub enum Function {
-    Native(NativeMispFunction),
     Runtime(RuntimeMispFunction),
     Lambda(Lambda),
 }
@@ -332,13 +313,6 @@ impl Executor {
                 self.stack.push(value.clone());
             }
             Instruction::Call(func) => match func {
-                Function::Native(native) => {
-                    self.env.push_scope();
-                    let value = (native.func)(self)?;
-                    self.env.pop_scope();
-
-                    self.stack.push(value);
-                }
                 Function::Runtime(rt) => {
                     let location = self
                         .function_location

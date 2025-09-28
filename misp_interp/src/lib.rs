@@ -60,7 +60,6 @@ impl Misp {
             Value::Decimal(d) => d.to_scientific_notation(),
             // Value::Decimal(d) => format!("{d:?}"),
             Value::Function(func) => match func {
-                Function::Native(_) => "<native>".to_string(),
                 Function::Runtime(rt) => format!("<function> -> ({})", rt.params.join(", ")),
                 Function::Lambda(l) => format!("<lambda> -> ({})", l.params.join(", ")),
             },

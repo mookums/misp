@@ -3,7 +3,7 @@ use compact_str::{CompactString, ToCompactString};
 use hashbrown::HashMap;
 use misp_num::{Sign, decimal::Decimal};
 
-use crate::{Function, NativeMispFunction, Value};
+use crate::Value;
 
 #[derive(Debug, Default, Clone)]
 pub struct Scope {
@@ -89,13 +89,6 @@ impl Environment {
     pub fn pop_scope(&mut self) {
         debug_assert!(self.scopes.len() > 1);
         self.scopes.pop();
-    }
-
-    pub fn define_native_function(&mut self, name: impl ToCompactString, f: NativeMispFunction) {
-        self.current_scope_mut().bindings.insert(
-            name.to_compact_string(),
-            Value::Function(Function::Native(f)),
-        );
     }
 
     pub fn set_prev(&mut self, value: Value) {
