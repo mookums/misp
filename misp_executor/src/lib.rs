@@ -416,7 +416,6 @@ impl Executor {
             }
             _ => {
                 let pc = self.compile_self(value, false)?;
-
                 self.pc = pc;
 
                 while self.pc < self.instructions.len() {
@@ -427,6 +426,7 @@ impl Executor {
                 }
 
                 let value = self.stack.pop().expect("Execute must return a value");
+                self.env.set_prev(value.clone());
                 Ok(value)
             }
         }
