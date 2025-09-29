@@ -18,11 +18,11 @@ use core::hash::Hash;
 use misp_num::decimal::Decimal;
 
 use crate::{
-    cas::CasOperation,
+    cas::{CasOperation, parse_cas_operation},
     config::Config,
     environment::Environment,
     instruction::Instruction,
-    operation::{BinaryOperation, Operation, UnaryOperation, VariadicOperation},
+    operation::{BinaryOperation, Operation, UnaryOperation, VariadicOperation, parse_operation},
     value::{Function, RuntimeMispFunction, Value},
 };
 
@@ -117,8 +117,7 @@ impl Executor {
                                 panic!("func arity");
                             }
 
-                            let mut iter = values.into_iter();
-                            iter.next();
+                            let mut iter = values.into_iter().skip(1);
 
                             let Value::Atom(name) = iter.next().unwrap() else {
                                 panic!("wrong func type")
@@ -158,8 +157,7 @@ impl Executor {
                                 panic!("if arity");
                             }
 
-                            let mut iter = values.into_iter();
-                            iter.next();
+                            let mut iter = values.into_iter().skip(1);
 
                             let condition = iter.next().unwrap();
                             let then_expr = iter.next().unwrap();
@@ -186,8 +184,7 @@ impl Executor {
                                 panic!("load arity");
                             }
 
-                            let mut iter = values.into_iter();
-                            iter.next();
+                            let mut iter = values.into_iter().skip(1);
 
                             let Value::Atom(name) = iter.next().unwrap() else {
                                 return Err(Error::InvalidType);
@@ -207,31 +204,69 @@ impl Executor {
 
                             self.stack.push(Value::Atom(name));
                         }
-                        "simplify" => {
-                            let arg = values[1].clone();
+                        cas_str if parse_cas_operation(cas_str).is_some() => {
+                            // Whenever if-let guards are fixed, use them.
+                            // cas_str if let Some(cas_operation) = parse_cas_operation(cas_str) => {
+                            let cas_operation = parse_cas_operation(cas_str).unwrap();
 
-                            self.instructions.push(Instruction::Push(arg));
-                            self.instructions
-                                .push(Instruction::Cas(CasOperation::Simplify));
+                            let mut iter = values.into_iter().skip(1);
 
-                            self.instructions
-                                .push(Instruction::Operation(Operation::Variadic(
-                                    VariadicOperation::Add,
-                                )));
+                            match cas_operation {
+                                CasOperation::Simplify | CasOperation::Expand => {
+                                    let arg = iter.next().unwrap();
+                                    self.instructions.push(Instruction::Push(arg));
+                                    self.instructions.push(Instruction::Cas(cas_operation));
+                                }
+                            }
                         }
-                        "+" => variadic_operation!(self, values, Add),
-                        "-" => variadic_operation!(self, values, Sub),
-                        "*" => variadic_operation!(self, values, Mult),
-                        "/" => variadic_operation!(self, values, Div),
-                        "==" => binary_operation!(self, values, Eq),
-                        "!=" => binary_operation!(self, values, Neq),
-                        ">" => binary_operation!(self, values, Gt),
-                        ">=" => binary_operation!(self, values, Gte),
-                        "<" => binary_operation!(self, values, Lt),
-                        "<=" => binary_operation!(self, values, Lte),
-                        "pow" => binary_operation!(self, values, Pow),
-                        "sqrt" => unary_operation!(self, values, Sqrt),
-                        "abs" => unary_operation!(self, values, Abs),
+                        op_str if parse_operation(op_str).is_some() => {
+                            // Whenever if-let guards are fixed, use them.
+                            // op_str if let Some(operation) = parse_operation(op_str) => {
+                            let operation = parse_operation(op_str).unwrap();
+
+                            match operation {
+                                Operation::Variadic(variadic) => {
+                                    let arity = (values.len() - 1) as u64;
+
+                                    for param in values.into_iter().skip(1) {
+                                        self.compile_value(param.clone(), CallKind::Normal)?;
+                                    }
+
+                                    self.instructions
+                                        .push(Instruction::Push(Value::Decimal(arity.into())));
+
+                                    self.instructions.push(Instruction::Operation(
+                                        Operation::Variadic(variadic),
+                                    ));
+                                }
+                                Operation::Binary(binary) => {
+                                    let arity = (values.len() - 1) as u64;
+                                    if arity != 2 {
+                                        panic!("arity mismatch on binary op")
+                                    }
+
+                                    for param in values.into_iter().skip(1) {
+                                        self.compile_value(param.clone(), CallKind::Normal)?;
+                                    }
+
+                                    self.instructions
+                                        .push(Instruction::Operation(Operation::Binary(binary)));
+                                }
+                                Operation::Unary(unary) => {
+                                    let arity = (values.len() - 1) as u64;
+                                    if arity != 1 {
+                                        panic!("arity mismatch on unary op")
+                                    }
+
+                                    for param in values.into_iter().skip(1) {
+                                        self.compile_value(param.clone(), CallKind::Normal)?;
+                                    }
+
+                                    self.instructions
+                                        .push(Instruction::Operation(Operation::Unary(unary)));
+                                }
+                            }
+                        }
                         _ => {
                             let arity = (values.len() - 1) as u64;
 
@@ -261,8 +296,6 @@ impl Executor {
                                     .push(Instruction::Push(Value::Decimal(arity.into())));
 
                                 self.instructions.push(Instruction::Load(name.clone()));
-
-                                // TODO: TailCallIndirect
 
                                 match call_kind {
                                     CallKind::Normal => {
@@ -467,6 +500,7 @@ impl Executor {
             Instruction::Cas(op) => {
                 let result = match op {
                     CasOperation::Simplify => cas::simplify::builtin_simplify(self)?,
+                    CasOperation::Expand => cas::expand::builtin_expand(self)?,
                 };
 
                 self.stack.push(result);
