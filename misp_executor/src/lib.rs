@@ -5,9 +5,13 @@ pub mod cas;
 pub mod config;
 pub mod environment;
 pub mod instruction;
+pub mod operation;
 pub mod value;
 
-use alloc::{string::String, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 use compact_str::CompactString;
 use hashbrown::{HashMap, HashSet};
 use misp_parser::Parser;
@@ -21,6 +25,7 @@ use crate::{
     config::Config,
     environment::Environment,
     instruction::Instruction,
+    operation::{BinaryOperation, Operation, UnaryOperation, VariadicOperation},
     value::{Function, RuntimeMispFunction, Value},
 };
 
@@ -211,17 +216,25 @@ impl Executor {
                             self.instructions.push(Instruction::Push(arg));
                             self.instructions
                                 .push(Instruction::Cas(CasOperation::Simplify));
+
+                            self.instructions
+                                .push(Instruction::Operation(Operation::Variadic(
+                                    VariadicOperation::Add,
+                                )));
                         }
-                        "+" => variadic_instruction!(self, values, Add),
-                        "-" => variadic_instruction!(self, values, Sub),
-                        "*" => variadic_instruction!(self, values, Mult),
-                        "/" => variadic_instruction!(self, values, Div),
-                        "==" => variadic_instruction!(self, values, Eq),
-                        "!=" => variadic_instruction!(self, values, Neq),
-                        ">" => variadic_instruction!(self, values, Gt),
-                        ">=" => variadic_instruction!(self, values, Gte),
-                        "<" => variadic_instruction!(self, values, Lt),
-                        "<=" => variadic_instruction!(self, values, Lte),
+                        "+" => variadic_operation!(self, values, Add),
+                        "-" => variadic_operation!(self, values, Sub),
+                        "*" => variadic_operation!(self, values, Mult),
+                        "/" => variadic_operation!(self, values, Div),
+                        "==" => binary_operation!(self, values, Eq),
+                        "!=" => binary_operation!(self, values, Neq),
+                        ">" => binary_operation!(self, values, Gt),
+                        ">=" => binary_operation!(self, values, Gte),
+                        "<" => binary_operation!(self, values, Lt),
+                        "<=" => binary_operation!(self, values, Lte),
+                        "pow" => binary_operation!(self, values, Pow),
+                        "sqrt" => unary_operation!(self, values, Sqrt),
+                        "abs" => unary_operation!(self, values, Abs),
                         _ => {
                             let arity = (values.len() - 1) as u64;
 
@@ -461,16 +474,130 @@ impl Executor {
 
                 self.stack.push(result);
             }
-            Instruction::Add => variadic_op!(self, +),
-            Instruction::Sub => variadic_op!(self, -),
-            Instruction::Mult => variadic_op!(self, *),
-            Instruction::Div => variadic_op!(self, /),
-            Instruction::Eq => binary_comparison!(self, ==),
-            Instruction::Neq => binary_comparison!(self, !=),
-            Instruction::Gt => binary_comparison!(self, >),
-            Instruction::Gte => binary_comparison!(self, >=),
-            Instruction::Lt => binary_comparison!(self, <),
-            Instruction::Lte => binary_comparison!(self, <=),
+            Instruction::Operation(op) => {
+                let result = match op {
+                    Operation::Variadic(variadic) => {
+                        const MAX_VARIADIC_ARGS: usize = 16;
+                        let mut values: [Decimal; MAX_VARIADIC_ARGS] =
+                            [const { Decimal::ZERO }; MAX_VARIADIC_ARGS];
+
+                        let Value::Decimal(arg_count) =
+                            self.stack.pop().ok_or(Error::EmptyStack)?
+                        else {
+                            return Err(Error::InvalidType);
+                        };
+
+                        let arity = arg_count.to_u128() as usize;
+                        if arity == 0 {
+                            return Err(Error::InvalidType);
+                        }
+
+                        // Pop ALL arguments from stack
+                        for i in (0..arity).rev() {
+                            let thunk = self.stack.pop().unwrap();
+                            values[i] = match thunk {
+                                Value::Decimal(val) => val,
+                                _ => return Err(Error::InvalidType),
+                            };
+                        }
+
+                        let mut acc = values[0];
+
+                        match variadic {
+                            VariadicOperation::Add => {
+                                for value in &values[1..arity] {
+                                    acc += *value;
+                                }
+
+                                Value::Decimal(acc)
+                            }
+                            VariadicOperation::Sub => {
+                                for value in &values[1..arity] {
+                                    acc -= *value;
+                                }
+
+                                Value::Decimal(acc)
+                            }
+                            VariadicOperation::Mult => {
+                                for value in &values[1..arity] {
+                                    acc *= *value;
+                                }
+
+                                Value::Decimal(acc)
+                            }
+                            VariadicOperation::Div => {
+                                for value in &values[1..arity] {
+                                    acc /= *value;
+                                }
+
+                                Value::Decimal(acc)
+                            }
+                        }
+                    }
+                    Operation::Binary(binary) => {
+                        let Value::Decimal(arity) = self.stack.pop().ok_or(Error::EmptyStack)?
+                        else {
+                            return Err(Error::InvalidType);
+                        };
+
+                        let arity_usize = arity.to_u128() as usize;
+                        if arity_usize != 2 {
+                            return Err(Error::FunctionArity {
+                                name: "<binary-op>".to_string(),
+                                expected: 2,
+                                actual: arity_usize,
+                            });
+                        }
+
+                        let Value::Decimal(right) = self.stack.pop().ok_or(Error::EmptyStack)?
+                        else {
+                            return Err(Error::InvalidType);
+                        };
+
+                        let Value::Decimal(left) = self.stack.pop().ok_or(Error::EmptyStack)?
+                        else {
+                            return Err(Error::InvalidType);
+                        };
+
+                        match binary {
+                            BinaryOperation::Eq => Value::Decimal(Decimal::from(left == right)),
+                            BinaryOperation::Neq => Value::Decimal(Decimal::from(left != right)),
+                            BinaryOperation::Gt => Value::Decimal(Decimal::from(left > right)),
+                            BinaryOperation::Gte => Value::Decimal(Decimal::from(left >= right)),
+                            BinaryOperation::Lt => Value::Decimal(Decimal::from(left < right)),
+                            BinaryOperation::Lte => Value::Decimal(Decimal::from(left <= right)),
+                            BinaryOperation::Pow => Value::Decimal(left.pow(right)),
+                        }
+                    }
+                    Operation::Unary(unary) => {
+                        let Value::Decimal(arity) = self.stack.pop().ok_or(Error::EmptyStack)?
+                        else {
+                            return Err(Error::InvalidType);
+                        };
+
+                        let arity_usize = arity.to_u128() as usize;
+                        if arity_usize != 1 {
+                            return Err(Error::FunctionArity {
+                                name: "<unary-op>".to_string(),
+                                expected: 1,
+                                actual: arity_usize,
+                            });
+                        }
+
+                        let Value::Decimal(value) = self.stack.pop().ok_or(Error::EmptyStack)?
+                        else {
+                            return Err(Error::InvalidType);
+                        };
+
+                        match unary {
+                            UnaryOperation::Sqrt => Value::Decimal(value.sqrt()),
+                            UnaryOperation::Abs => Value::Decimal(value.abs()),
+                        }
+                    }
+                };
+
+                self.stack.push(result);
+            }
         }
 
         Ok(())

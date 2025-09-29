@@ -204,6 +204,11 @@ impl Decimal {
         current.normalize()
     }
 
+    pub fn abs(mut self) -> Decimal {
+        self.sign = Sign::Positive;
+        self
+    }
+
     pub fn is_integer(self) -> bool {
         self.scale == 0 || self.value % 10_u64.pow(self.scale as u32) == 0
     }
