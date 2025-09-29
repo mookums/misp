@@ -8,10 +8,7 @@ pub mod instruction;
 pub mod operation;
 pub mod value;
 
-use alloc::{
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{string::String, vec::Vec};
 use compact_str::CompactString;
 use hashbrown::{HashMap, HashSet};
 use misp_parser::Parser;
@@ -535,20 +532,6 @@ impl Executor {
                         }
                     }
                     Operation::Binary(binary) => {
-                        let Value::Decimal(arity) = self.stack.pop().ok_or(Error::EmptyStack)?
-                        else {
-                            return Err(Error::InvalidType);
-                        };
-
-                        let arity_usize = arity.to_u128() as usize;
-                        if arity_usize != 2 {
-                            return Err(Error::FunctionArity {
-                                name: "<binary-op>".to_string(),
-                                expected: 2,
-                                actual: arity_usize,
-                            });
-                        }
-
                         let Value::Decimal(right) = self.stack.pop().ok_or(Error::EmptyStack)?
                         else {
                             return Err(Error::InvalidType);
@@ -570,20 +553,6 @@ impl Executor {
                         }
                     }
                     Operation::Unary(unary) => {
-                        let Value::Decimal(arity) = self.stack.pop().ok_or(Error::EmptyStack)?
-                        else {
-                            return Err(Error::InvalidType);
-                        };
-
-                        let arity_usize = arity.to_u128() as usize;
-                        if arity_usize != 1 {
-                            return Err(Error::FunctionArity {
-                                name: "<unary-op>".to_string(),
-                                expected: 1,
-                                actual: arity_usize,
-                            });
-                        }
-
                         let Value::Decimal(value) = self.stack.pop().ok_or(Error::EmptyStack)?
                         else {
                             return Err(Error::InvalidType);

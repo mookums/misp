@@ -51,9 +51,6 @@ macro_rules! unary_operation {
         }
 
         $e.instructions
-            .push(Instruction::Push(Value::Decimal(arity.into())));
-
-        $e.instructions
             .push(Instruction::Operation(Operation::Unary(
                 UnaryOperation::$op,
             )));
@@ -71,9 +68,6 @@ macro_rules! binary_operation {
         for param in $values.into_iter().skip(1) {
             $e.compile_value(param.clone(), CallKind::Normal)?;
         }
-
-        $e.instructions
-            .push(Instruction::Push(Value::Decimal(arity.into())));
 
         $e.instructions
             .push(Instruction::Operation(Operation::Binary(
