@@ -1,4 +1,8 @@
-use misp_executor::{Executor, Function, Value, instruction::Instruction};
+use misp_executor::{
+    Executor,
+    instruction::Instruction,
+    value::{Function, Value},
+};
 use misp_parser::Parser;
 
 #[derive(Default)]

@@ -1,93 +1,27 @@
 #![no_std]
 extern crate alloc;
 
-mod builtin;
 pub mod cas;
 pub mod config;
 pub mod environment;
 pub mod instruction;
+pub mod value;
 
-use alloc::{
-    boxed::Box,
-    rc::Rc,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{string::String, vec::Vec};
 use compact_str::CompactString;
 use hashbrown::{HashMap, HashSet};
 
 use core::hash::Hash;
 
 use misp_num::decimal::Decimal;
-use misp_parser::SExpr;
 
 use crate::{
-    cas::CasOperation, config::Config, environment::Environment, instruction::Instruction,
+    cas::CasOperation,
+    config::Config,
+    environment::Environment,
+    instruction::Instruction,
+    value::{Function, RuntimeMispFunction, Value},
 };
-
-#[derive(Debug, Clone, Hash, PartialEq)]
-pub struct Lambda {
-    pub params: Vec<CompactString>,
-    pub body: Box<Value>,
-}
-
-#[derive(Debug, Clone)]
-pub struct RuntimeMispFunction {
-    pub id: usize,
-    pub params: Rc<Vec<CompactString>>,
-    pub body: Rc<Value>,
-}
-
-impl PartialEq for RuntimeMispFunction {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for RuntimeMispFunction {}
-
-impl Hash for RuntimeMispFunction {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
-
-impl Ord for RuntimeMispFunction {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.id.cmp(&other.id)
-    }
-}
-
-impl PartialOrd for RuntimeMispFunction {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-#[derive(Debug, Clone, Hash, PartialEq)]
-pub enum Function {
-    Runtime(RuntimeMispFunction),
-    Lambda(Lambda),
-}
-
-#[derive(Debug, Clone, Hash, PartialEq)]
-pub enum Value {
-    Atom(CompactString),
-    Symbol(CompactString),
-    List(Vec<Value>),
-    Decimal(Decimal),
-    Function(Function),
-}
-
-impl From<SExpr> for Value {
-    fn from(value: SExpr) -> Self {
-        match value {
-            SExpr::Atom(str) => Value::Atom(str),
-            SExpr::List(sexprs) => Value::List(sexprs.into_iter().map(|e| e.into()).collect()),
-            SExpr::Decimal(d) => Value::Decimal(d),
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MemoKey {
@@ -140,39 +74,6 @@ impl Default for Executor {
         let config = Config::default();
         let mut env = Environment::default();
         env.load_constants();
-
-        // Functions
-        // env.define_native_function("func", builtin_func);
-        // env.define_native_function("lambda", builtin_lambda);
-
-        // Control Functions
-        // env.define_native_function("if", builtin_if);
-
-        // Math Functions
-        // env.define_native_function("+", builtin_add);
-        // env.define_native_function("-", builtin_minus);
-        // env.define_native_function("*", builtin_multiply);
-        // env.define_native_function("/", builtin_divide);
-        // env.define_native_function("%", builtin_mod);
-        // env.define_native_function("min", builtin_min);
-        // env.define_native_function("max", builtin_max);
-        // env.define_native_function("abs", builtin_abs);
-        // env.define_native_function("pow", builtin_pow);
-        // env.define_native_function("sqrt", builtin_sqrt);
-        // env.define_native_function("summate", builtin_summate);
-
-        // Combinatorics
-        // env.define_native_function("factorial", builtin_factorial);
-        // env.define_native_function("combinations", builtin_combinations);
-        // env.define_native_function("permutations", builtin_permutations);
-
-        // Trig Functions
-        // env.define_native_function("sin", builtin_sin);
-        // env.define_native_function("cos", builtin_cos);
-        // env.define_native_function("tan", builtin_tan);
-        // env.define_native_function("asin", builtin_asin);
-        // env.define_native_function("acos", builtin_acos);
-        // env.define_native_function("atan", builtin_atan);
 
         env.push_scope();
         env.set_prev(Value::Decimal(Decimal::ZERO));
@@ -420,19 +321,7 @@ impl Executor {
                         .get(&rt.id)
                         .expect("Function must have a location");
 
-                    let Value::Decimal(arity) = self.stack.pop().unwrap() else {
-                        return Err(Error::InvalidType);
-                    };
-
-                    let arity_usize = arity.to_u128() as usize;
-
-                    if arity.to_u128() as usize != rt.params.len() {
-                        return Err(Error::FunctionArity {
-                            name: "<func>".to_string(),
-                            expected: arity_usize,
-                            actual: rt.params.len(),
-                        });
-                    }
+                    arity_check!(self, "<func>", rt.params.len());
 
                     self.frames.push(CallFrame {
                         return_pc: self.pc,
@@ -542,4 +431,24 @@ impl Executor {
             }
         }
     }
+}
+
+#[macro_export]
+macro_rules! arity_check {
+    ($e:ident, $name:expr, $expected:expr) => {
+        let Value::Decimal(arity) = $e.stack.pop().unwrap() else {
+            return Err(Error::InvalidType);
+        };
+
+        let arity_int = arity.to_u128() as usize;
+        if arity_int != $expected {
+            use alloc::string::ToString;
+
+            return Err(Error::FunctionArity {
+                name: $name.to_string(),
+                expected: $expected,
+                actual: arity_int,
+            });
+        }
+    };
 }
