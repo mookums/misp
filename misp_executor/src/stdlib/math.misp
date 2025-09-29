@@ -1,0 +1,21 @@
+(func identity (x) x)
+(func square (x) (* x x))
+(func cube (x) (* x x x))
+
+(func _fibTail (n a b) (if (<= n 0) a (_fibTail (- n 1) b (+ a b))))
+(func fib (n) (if (<= n 1) n (_fibTail n 0 1)))
+
+(func _factorialTail (n acc) (if (== n 0) acc (_factorialTail (- n 1) (* n acc))))
+(func factorial (n) (_factorialTail n 1))
+
+(func _summateTail (i l f acc) (if (> i l) acc (_summateTail (+ i 1) l f (+ acc (f i)))))
+(func summate (i l f) (_summateTail i l f 0))
+
+(func _gcdTail (a b)
+	(if (== b 0)
+		a
+		(if (> a b)
+			(_gcdTail (- a b) b)
+			(_gcdTail a (- b a)))))
+
+(func gcd (a b) (_gcdTail a b))

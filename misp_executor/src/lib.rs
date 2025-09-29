@@ -10,6 +10,7 @@ pub mod value;
 use alloc::{string::String, vec::Vec};
 use compact_str::CompactString;
 use hashbrown::{HashMap, HashSet};
+use misp_parser::Parser;
 
 use core::hash::Hash;
 
@@ -47,6 +48,8 @@ pub enum Error {
     InvalidType,
     #[error("Empty Stack")]
     EmptyStack,
+    #[error("Module not found")]
+    ModuleNotFound,
 }
 
 #[derive(Debug)]
@@ -92,8 +95,13 @@ impl Default for Executor {
     }
 }
 
+enum CallKind {
+    Normal,
+    Tail,
+}
+
 impl Executor {
-    fn compile_value(&mut self, value: Value, is_tail: bool) -> Result<(), Error> {
+    fn compile_value(&mut self, value: Value, call_kind: CallKind) -> Result<(), Error> {
         match value {
             Value::Atom(atom) => self.instructions.push(Instruction::Load(atom)),
             Value::Decimal(_) | Value::Function(_) | Value::Symbol(_) => {
@@ -139,7 +147,9 @@ impl Executor {
                             let function = Value::Function(Function::Runtime(rt_func));
                             self.env.set_global(name, function.clone());
 
-                            self.instructions.push(Instruction::Push(function));
+                            // functions don't actually execute so, we just push this
+                            // so that we can properly return after load.
+                            self.stack.push(function);
                         }
                         "if" => {
                             if values.len() != 4 {
@@ -153,21 +163,47 @@ impl Executor {
                             let then_expr = iter.next().unwrap();
                             let else_expr = iter.next().unwrap();
 
-                            self.compile_value(condition, false)?;
+                            self.compile_value(condition, CallKind::Normal)?;
 
                             let jz_to_else = self.instructions.len();
                             self.instructions.push(Instruction::Placeholder);
 
-                            self.compile_value(then_expr, is_tail)?;
+                            self.compile_value(then_expr, CallKind::Tail)?;
                             let jmp_past_else = self.instructions.len();
                             self.instructions.push(Instruction::Placeholder);
 
                             let else_start = self.instructions.len();
-                            self.compile_value(else_expr, is_tail)?;
+                            self.compile_value(else_expr, CallKind::Tail)?;
 
                             let end = self.instructions.len();
                             self.instructions[jz_to_else] = Instruction::Jz(else_start);
                             self.instructions[jmp_past_else] = Instruction::Jmp(end);
+                        }
+                        "load" => {
+                            if values.len() != 2 {
+                                panic!("load arity");
+                            }
+
+                            let mut iter = values.into_iter();
+                            iter.next();
+
+                            let Value::Atom(name) = iter.next().unwrap() else {
+                                return Err(Error::InvalidType);
+                            };
+
+                            let module = match name.as_str() {
+                                "math" | "math.misp" => include_str!("./stdlib/math.misp"),
+                                _ => return Err(Error::ModuleNotFound),
+                            };
+
+                            let mut parser = Parser::new(module);
+                            let sexprs = parser.parse_multiple().unwrap();
+
+                            for sexpr in sexprs {
+                                self.execute_module(sexpr.into())?;
+                            }
+
+                            self.stack.push(Value::Atom(name));
                         }
                         "simplify" => {
                             let arg = values[1].clone();
@@ -195,21 +231,38 @@ impl Executor {
                             };
 
                             for param in iter {
-                                self.compile_value(param.clone(), false)?;
+                                self.compile_value(param.clone(), CallKind::Normal)?;
                             }
 
-                            let Value::Function(func) = self.env.get(&name) else {
-                                return Err(Error::InvalidType);
-                            };
+                            if let Value::Function(func) = self.env.get(&name) {
+                                self.instructions
+                                    .push(Instruction::Push(Value::Decimal(arity.into())));
 
-                            self.instructions
-                                .push(Instruction::Push(Value::Decimal(arity.into())));
-
-                            if is_tail {
-                                self.instructions.push(Instruction::TailCall(func.clone()));
+                                match call_kind {
+                                    CallKind::Normal => {
+                                        self.instructions.push(Instruction::Call(func.clone()))
+                                    }
+                                    CallKind::Tail => {
+                                        self.instructions.push(Instruction::TailCall(func.clone()))
+                                    }
+                                }
                             } else {
-                                self.instructions.push(Instruction::Call(func.clone()));
-                            }
+                                self.instructions
+                                    .push(Instruction::Push(Value::Decimal(arity.into())));
+
+                                self.instructions.push(Instruction::Load(name.clone()));
+
+                                // TODO: TailCallIndirect
+
+                                match call_kind {
+                                    CallKind::Normal => {
+                                        self.instructions.push(Instruction::CallIndirect)
+                                    }
+                                    CallKind::Tail => {
+                                        self.instructions.push(Instruction::TailCallIndirect)
+                                    }
+                                }
+                            };
                         }
                     }
                 }
@@ -219,10 +272,10 @@ impl Executor {
         Ok(())
     }
 
-    fn compile_self(&mut self, value: Value, is_tail: bool) -> Result<usize, Error> {
+    fn compile_self(&mut self, value: Value, call_kind: CallKind) -> Result<usize, Error> {
         self.discover_and_compile_rt_funcs(&value)?;
         let offset = self.instructions.len();
-        self.compile_value(value, is_tail)?;
+        self.compile_value(value, call_kind)?;
         Ok(offset)
     }
 
@@ -232,7 +285,7 @@ impl Executor {
         self.frames.clear();
         self.function_location.clear();
 
-        let pc = self.compile_self(value, false)?;
+        let pc = self.compile_self(value, CallKind::Normal)?;
         Ok((pc, self.instructions.clone()))
     }
 
@@ -279,9 +332,62 @@ impl Executor {
 
             self.function_location.insert(rt.id, start_location);
 
-            self.compile_value((*rt.body).clone(), true)?;
+            self.compile_value((*rt.body).clone(), CallKind::Tail)?;
 
             self.instructions.push(Instruction::Return);
+        }
+
+        Ok(())
+    }
+
+    fn execute_call(self: &mut Executor, func: Function) -> Result<(), Error> {
+        match func {
+            Function::Runtime(rt) => {
+                let location = self
+                    .function_location
+                    .get(&rt.id)
+                    .expect("Function must have a location");
+
+                arity_check!(self, "<func>", rt.params.len());
+
+                self.frames.push(CallFrame {
+                    return_pc: self.pc,
+                    stack_base: self.stack.len(),
+                });
+
+                self.env.push_scope();
+                self.pc = *location;
+            }
+            Function::Lambda(_) => todo!(),
+        }
+
+        Ok(())
+    }
+
+    fn execute_tail_call(self: &mut Executor, func: Function) -> Result<(), Error> {
+        match func {
+            Function::Runtime(rt) => {
+                let location = self
+                    .function_location
+                    .get(&rt.id)
+                    .expect("Function must have a location");
+
+                let frame = self.frames.last().expect("Must have a last frame");
+
+                let Value::Decimal(arity) = self.stack.pop().unwrap() else {
+                    return Err(Error::InvalidType);
+                };
+
+                let new_args: Vec<Value> = self
+                    .stack
+                    .split_off(self.stack.len() - arity.to_u128() as usize);
+
+                self.stack.truncate(frame.stack_base);
+
+                self.stack.extend(new_args);
+                self.pc = *location;
+            }
+            Function::Lambda(_) => todo!(),
         }
 
         Ok(())
@@ -314,49 +420,22 @@ impl Executor {
                 let value = self.env.get(&name);
                 self.stack.push(value.clone());
             }
-            Instruction::Call(func) => match func {
-                Function::Runtime(rt) => {
-                    let location = self
-                        .function_location
-                        .get(&rt.id)
-                        .expect("Function must have a location");
+            Instruction::Call(func) => self.execute_call(func)?,
+            Instruction::CallIndirect => {
+                let Value::Function(func) = self.stack.pop().unwrap() else {
+                    return Err(Error::InvalidType);
+                };
 
-                    arity_check!(self, "<func>", rt.params.len());
+                self.execute_call(func)?
+            }
+            Instruction::TailCall(func) => self.execute_tail_call(func)?,
+            Instruction::TailCallIndirect => {
+                let Value::Function(func) = self.stack.pop().unwrap() else {
+                    return Err(Error::InvalidType);
+                };
 
-                    self.frames.push(CallFrame {
-                        return_pc: self.pc,
-                        stack_base: self.stack.len(),
-                    });
-
-                    self.env.push_scope();
-                    self.pc = *location;
-                }
-                Function::Lambda(_) => todo!(),
-            },
-            Instruction::TailCall(func) => match func {
-                Function::Runtime(rt) => {
-                    let location = self
-                        .function_location
-                        .get(&rt.id)
-                        .expect("Function must have a location");
-
-                    let frame = self.frames.last().expect("Must have a last frame");
-
-                    let Value::Decimal(arity) = self.stack.pop().unwrap() else {
-                        return Err(Error::InvalidType);
-                    };
-
-                    let new_args: Vec<Value> = self
-                        .stack
-                        .split_off(self.stack.len() - arity.to_u128() as usize);
-
-                    self.stack.truncate(frame.stack_base);
-
-                    self.stack.extend(new_args);
-                    self.pc = *location;
-                }
-                Function::Lambda(_) => todo!(),
-            },
+                self.execute_tail_call(func)?
+            }
             Instruction::Return => {
                 let frame = self.frames.pop().expect("Can't return without frame");
                 self.pc = frame.return_pc;
@@ -397,11 +476,31 @@ impl Executor {
         Ok(())
     }
 
-    pub fn execute(&mut self, value: Value) -> Result<Value, Error> {
+    fn reset(&mut self) {
         self.pc = 0;
         self.instructions.clear();
         self.frames.clear();
         self.function_location.clear();
+    }
+
+    pub fn execute_module(&mut self, value: Value) -> Result<Value, Error> {
+        self.reset();
+        self.compile_value(value, CallKind::Normal)?;
+        self.pc = 0;
+
+        while self.pc < self.instructions.len() {
+            let current_pc = self.pc;
+            self.pc += 1;
+            let instr = self.instructions[current_pc].clone();
+            self.execute_instruction(instr)?;
+        }
+
+        let value = self.stack.pop().expect("Execute must return a value");
+        Ok(value)
+    }
+
+    pub fn execute(&mut self, value: Value) -> Result<Value, Error> {
+        self.reset();
 
         match value {
             Value::Atom(name) => {
@@ -415,7 +514,7 @@ impl Executor {
                 Ok(value)
             }
             _ => {
-                let pc = self.compile_self(value, false)?;
+                let pc = self.compile_self(value, CallKind::Normal)?;
                 self.pc = pc;
 
                 while self.pc < self.instructions.len() {

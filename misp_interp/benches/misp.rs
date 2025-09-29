@@ -3,6 +3,7 @@ use misp_interp::Misp;
 
 fn criterion_benchmark(c: &mut Criterion) {
     let mut misp = Misp::default();
+    misp.eval("(load math)").unwrap();
 
     c.bench_function("interp basic number", |b| {
         b.iter(|| misp.eval("0").unwrap());
@@ -56,13 +57,13 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     c.bench_function("interp function call", |b| {
-        misp.eval("(func square (x) (* x x))").unwrap();
-        b.iter(|| misp.eval("(square 15)").unwrap());
+        misp.eval("(func quadruple (x) (* 4 x))").unwrap();
+        b.iter(|| misp.eval("(quadruple 15)").unwrap());
     });
 
-    // c.bench_function("interp small summate", |b| {
-    //     b.iter(|| misp.eval("(summate 0 10 sqrt)").unwrap());
-    // });
+    c.bench_function("interp small summate", |b| {
+        b.iter(|| misp.eval("(summate 0 10 square)").unwrap());
+    });
 
     c.bench_function("interp pi constant", |b| {
         b.iter(|| misp.eval("math::pi").unwrap());
@@ -73,34 +74,23 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     c.bench_function("interp runtime fibonacci", |b| {
-        misp.eval("(func fib (n) (if (<= n 1) n (+ (fib (- n 2)) (fib (- n 1)))))")
+        misp.eval("(func fibRt (n) (if (<= n 1) n (+ (fib (- n 2)) (fibRt (- n 1)))))")
             .unwrap();
+        b.iter(|| misp.eval("(fibRt 10)").unwrap());
+    });
+
+    c.bench_function("interp fib stdlib", |b| {
         b.iter(|| misp.eval("(fib 10)").unwrap());
     });
 
-    c.bench_function("interp runtime fibonacci (tail)", |b| {
-        misp.eval("(func fibTailHelper (n a b) (if (<= n 0) a (fibTailHelper (- n 1) b (+ a b))))")
-            .unwrap();
-        misp.eval("(func fibTail (n) (if (<= n 1) n (fibTail n 0 1)))")
-            .unwrap();
-        b.iter(|| misp.eval("(fibTail 10)").unwrap());
-    });
-
     c.bench_function("interp runtime factorial", |b| {
-        misp.eval("(func factorialRuntime (n) (if (<= n 1) 1 (* n (factorialRuntime (- n 1)))))")
+        misp.eval("(func factorialRt (n) (if (<= n 1) 1 (* n (factorialRt (- n 1)))))")
             .unwrap();
-        b.iter(|| misp.eval("(factorialRuntime 1000)").unwrap());
+        b.iter(|| misp.eval("(factorialRt 1000)").unwrap());
     });
 
-    c.bench_function("interp runtime factorial (tail)", |b| {
-        misp.eval(
-            "(func factorialTailHelper (n acc) (if (== n 0) acc (factorialTailHelper (- n 1) (* n acc))))",
-        )
-        .unwrap();
-        misp.eval("(func factorialTail (n) (factorialTailHelper n 1))")
-            .unwrap();
-
-        b.iter(|| misp.eval("(factorialTail 1000)").unwrap());
+    c.bench_function("interp factorial stdlib", |b| {
+        b.iter(|| misp.eval("(factorial 1000)").unwrap());
     });
 
     // c.bench_function("interp builtin factorial", |b| {

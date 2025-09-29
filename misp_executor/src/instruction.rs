@@ -10,7 +10,11 @@ pub enum Instruction {
     Store(CompactString),
     Load(CompactString),
     TailCall(Function),
+    // Directly call a function.
     Call(Function),
+    // Indirectly call a function from the stack.
+    CallIndirect,
+    TailCallIndirect,
     Return,
     // Control Flow
     Jmp(usize),
@@ -49,7 +53,7 @@ macro_rules! variadic_instruction {
         let arity = ($values.len() - 1) as u64;
 
         for param in $values.into_iter().skip(1) {
-            $e.compile_value(param.clone(), false)?;
+            $e.compile_value(param.clone(), CallKind::Normal)?;
         }
 
         $e.instructions
