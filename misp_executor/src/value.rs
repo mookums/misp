@@ -5,7 +5,7 @@ use compact_str::CompactString;
 use misp_num::decimal::Decimal;
 use misp_parser::SExpr;
 
-#[derive(Debug, Clone, Hash, PartialEq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Lambda {
     pub params: Vec<CompactString>,
     pub body: Box<Value>,
@@ -44,13 +44,13 @@ impl PartialOrd for RuntimeMispFunction {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Function {
     Runtime(RuntimeMispFunction),
     Lambda(Lambda),
 }
 
-#[derive(Debug, Clone, Hash, PartialEq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Value {
     Atom(CompactString),
     Symbol(CompactString),

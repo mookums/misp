@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use crate::{
     Error, Executor,
     operation::{Operation, parse_operation},
-    value::Value,
+    value::{Function, Value},
 };
 
 pub fn builtin_expand(executor: &mut Executor) -> Result<Value, Error> {
@@ -16,17 +16,18 @@ pub fn expand(executor: &mut Executor, expr: Value) -> Result<Value, Error> {
     match expr {
         Value::Atom(name) => Ok(executor.env.get(&name)),
         Value::List(values) => {
-            let Value::Atom(op) = values.first().unwrap() else {
+            let mut iter = values.into_iter();
+            let name_value = iter.next().unwrap();
+            let Value::Atom(ref name) = name_value else {
                 panic!("cant expand broken list");
             };
 
-            match parse_operation(op) {
+            match parse_operation(name) {
                 Some(operation) if operation.is_associative() => {
-                    expand_flatten(executor, &values[1..], operation)
+                    expand_flatten(executor, iter.as_slice(), operation)
                 }
-                Some(_) => {
-                    let mut iter = values.into_iter();
-                    let mut expanded = vec![iter.next().unwrap()];
+                Some(_op) => {
+                    let mut expanded = vec![name_value];
 
                     for arg in iter {
                         expanded.push(expand(executor, arg)?);
@@ -35,16 +36,37 @@ pub fn expand(executor: &mut Executor, expr: Value) -> Result<Value, Error> {
                     Ok(Value::List(expanded))
                 }
                 None => {
-                    let mut expanded = Vec::new();
-                    for val in values.into_iter() {
-                        expanded.push(expand(executor, val)?);
+                    // this means it is a function call.
+                    //
+                    // we want to dynamically substitute values in the function body
+                    // with the arguments here
+                    //
+                    // then we want to put the function body in place here.
+
+                    let Value::Function(func) = executor.env.get(name) else {
+                        panic!("unknown function getting expanded");
+                    };
+
+                    let mut expanded = vec![];
+
+                    match func {
+                        Function::Runtime(rt) => {
+                            let mut body = (*rt.body).clone();
+
+                            for pair in rt.params.iter().zip(iter) {
+                                substitute(&mut body, Value::Atom(pair.0.clone()), pair.1);
+                            }
+
+                            expanded.push(expand(executor, body)?);
+                        }
+                        Function::Lambda(_) => todo!(),
                     }
 
                     Ok(Value::List(expanded))
                 }
             }
         }
-        Value::Function(_) => todo!(),
+        Value::Function(_) => panic!(),
         Value::Symbol(_) | Value::Decimal(_) => Ok(expr),
     }
 }
@@ -73,4 +95,16 @@ fn expand_flatten(
     let mut result = vec![operation.to_atom_value()];
     result.extend(flattened);
     Ok(Value::List(result))
+}
+
+fn substitute(expr: &mut Value, target: Value, replacement: Value) {
+    if *expr == target {
+        *expr = replacement;
+    } else if let Value::List(list) = expr {
+        let iter = list.iter_mut().skip(1);
+
+        for arg in iter {
+            substitute(arg, target.clone(), replacement.clone());
+        }
+    }
 }
