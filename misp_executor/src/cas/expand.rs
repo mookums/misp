@@ -47,8 +47,6 @@ pub fn expand(executor: &mut Executor, expr: Value) -> Result<Value, Error> {
                         panic!("unknown function getting expanded");
                     };
 
-                    let mut expanded = vec![];
-
                     match func {
                         Function::Runtime(rt) => {
                             let mut body = (*rt.body).clone();
@@ -57,12 +55,10 @@ pub fn expand(executor: &mut Executor, expr: Value) -> Result<Value, Error> {
                                 substitute(&mut body, Value::Atom(pair.0.clone()), pair.1);
                             }
 
-                            expanded.push(expand(executor, body)?);
+                            Ok(body)
                         }
                         Function::Lambda(_) => todo!(),
                     }
-
-                    Ok(Value::List(expanded))
                 }
             }
         }

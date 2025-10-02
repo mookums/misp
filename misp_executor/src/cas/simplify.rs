@@ -2,7 +2,11 @@ use alloc::vec;
 use alloc::vec::Vec;
 use misp_num::decimal::Decimal;
 
-use crate::{Error, Executor, Value};
+use crate::{
+    Error, Executor, Value,
+    cas::expand::expand,
+    operation::{Operation, UnaryOperation, VariadicOperation, parse_operation},
+};
 
 pub fn builtin_simplify(executor: &mut Executor) -> Result<Value, Error> {
     let arg = executor.stack.pop().ok_or(Error::EmptyStack)?;
@@ -10,7 +14,9 @@ pub fn builtin_simplify(executor: &mut Executor) -> Result<Value, Error> {
 }
 
 fn simplify(executor: &mut Executor, expr: Value) -> Result<Value, Error> {
-    let simplified = match expr {
+    let expanded = expand(executor, expr)?;
+
+    let simplified = match expanded {
         Value::List(values) => {
             let Value::Atom(op) = values.first().unwrap() else {
                 return Err(Error::InvalidType);
@@ -19,17 +25,30 @@ fn simplify(executor: &mut Executor, expr: Value) -> Result<Value, Error> {
             simplify_operation(executor, op, &values[1..])?
         }
         Value::Atom(str) => executor.env.get(&str),
-        Value::Decimal(_) | Value::Symbol(_) => expr,
-        _ => expr,
+        Value::Decimal(_) | Value::Symbol(_) => expanded,
+        _ => expanded,
     };
 
     Ok(simplified)
 }
 
 fn simplify_operation(executor: &mut Executor, op: &str, args: &[Value]) -> Result<Value, Error> {
-    match op {
-        "+" => simplify_addition(executor, args),
-        _ => todo!(),
+    let Some(operation) = parse_operation(op) else {
+        panic!("unsupported simplification");
+    };
+
+    match operation {
+        Operation::Variadic(variadic) => match variadic {
+            VariadicOperation::Add => simplify_addition(executor, args),
+            VariadicOperation::Sub => todo!(),
+            VariadicOperation::Mult => simplify_multiply(executor, args),
+            VariadicOperation::Div => todo!(),
+        },
+        Operation::Binary(_) => todo!(),
+        Operation::Unary(unary) => match unary {
+            UnaryOperation::Sqrt => todo!(),
+            UnaryOperation::Abs => todo!(),
+        },
     }
 }
 
@@ -42,28 +61,7 @@ fn simplify_addition(executor: &mut Executor, args: &[Value]) -> Result<Value, E
 
         match simplified {
             Value::Decimal(n) => sum += n,
-            Value::List(list) if list.len() > 1 => {
-                if let Value::Atom(op) = &list[0]
-                    && op == "+"
-                {
-                    let flattened = simplify_addition(executor, &list[1..])?;
-                    match flattened {
-                        Value::List(inner) if inner[0] == Value::Atom("+".into()) => {
-                            // Unpack the inner addition terms.
-                            for term in &inner[1..] {
-                                if let Value::Decimal(n) = term {
-                                    sum += *n;
-                                } else {
-                                    symbols.push(term.clone());
-                                }
-                            }
-                        }
-                        Value::Decimal(n) => sum += n,
-                        other => symbols.push(other),
-                    }
-
-                    continue;
-                }
+            Value::List(_) => {
                 symbols.push(arg.clone());
             }
             _ => symbols.push(simplified),
@@ -83,6 +81,43 @@ fn simplify_addition(executor: &mut Executor, args: &[Value]) -> Result<Value, E
         1 => result[0].clone(),
         _ => Value::List({
             let mut list = vec![Value::Atom("+".into())];
+            list.extend(result);
+            list
+        }),
+    };
+
+    Ok(res)
+}
+
+fn simplify_multiply(executor: &mut Executor, args: &[Value]) -> Result<Value, Error> {
+    let mut product = Decimal::ONE;
+    let mut symbols = Vec::new();
+
+    for arg in args {
+        let simplified = simplify(executor, arg.clone())?;
+
+        match simplified {
+            Value::Decimal(n) => product *= n,
+            Value::List(_) => {
+                symbols.push(arg.clone());
+            }
+            _ => symbols.push(simplified),
+        }
+    }
+
+    let mut result = Vec::new();
+
+    result.extend(symbols);
+
+    if product != Decimal::ZERO {
+        result.push(Value::Decimal(product));
+    }
+
+    let res = match result.len() {
+        0 => Value::Decimal(Decimal::ZERO),
+        1 => result[0].clone(),
+        _ => Value::List({
+            let mut list = vec![Value::Atom("*".into())];
             list.extend(result);
             list
         }),
