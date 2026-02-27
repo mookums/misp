@@ -109,7 +109,7 @@ fn simplify_multiply(executor: &mut Executor, args: &[Value]) -> Result<Value, E
 
     result.extend(symbols);
 
-    if product != Decimal::ZERO {
+    if product != Decimal::ONE {
         result.push(Value::Decimal(product));
     }
 

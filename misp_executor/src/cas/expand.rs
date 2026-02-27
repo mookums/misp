@@ -51,11 +51,12 @@ pub fn expand(executor: &mut Executor, expr: Value) -> Result<Value, Error> {
                         Function::Runtime(rt) => {
                             let mut body = (*rt.body).clone();
 
-                            for pair in rt.params.iter().zip(iter) {
-                                substitute(&mut body, Value::Atom(pair.0.clone()), pair.1);
+                            for (param, value) in rt.params.iter().zip(iter) {
+                                substitute(&mut body, Value::Atom(param.clone()), value);
                             }
 
-                            Ok(body)
+                            let expanded = expand(executor, body)?;
+                            Ok(expanded)
                         }
                         Function::Lambda(_) => todo!(),
                     }
